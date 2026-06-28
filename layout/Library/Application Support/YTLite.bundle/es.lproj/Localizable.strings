@@ -1,13 +1,3 @@
-/* Patreon section */
-"SkipLogInAlert" = "Suprimir recordatorio de inicio de sesión";
-"Log-inViaPatreon" = "Iniciar sesión mediante Patreon";
-"ManageAccount" = "Administrar cuenta";
-"AccessDenied" = "Acceso denegado";
-"LogOut" = "Cerrar sesión";
-"LogOutTitle" = "Cerrar sesión";
-"LogOutMessage" = "¿Seguro que quieres continuar?";
-"FeaturesNotActivated" = "No has iniciado sesión. Para acceder a las características de YouTube Plus, por favor inicia sesión con una subscripción activa de Patreon.";
-
 /* Main section */
 "Main" = "Principal";
 "Search" = "Buscar";

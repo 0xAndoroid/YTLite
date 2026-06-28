@@ -52,8 +52,7 @@ A flexible enhancer for YouTube on iOS, featuring over hundred customizable opti
 **Used open-source libraries are listed in the Open Source Libraries section**
 
 > [!NOTE]
-> Starting from version 5.2, YTPlus requires a subscription.  
-> The last free version is [5.2b4](https://github.com/dayanch96/YTLite/releases/tag/v5.2b4).
+> This fork's sideloading workflows use the last free YouTube Plus release and do not require paid activation.
 
 ## FAQ
 - [🇺🇸 English FAQ](FAQs/FAQ_EN.md)

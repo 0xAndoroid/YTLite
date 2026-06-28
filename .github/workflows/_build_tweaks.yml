@@ -43,6 +43,9 @@ on:
         required: false
         default: ""
 
+env:
+  YTLITE_FREE_VERSION: 5.2b4
+
 jobs:
   build-tweaks:
     name: Build Tweaks
@@ -86,10 +89,10 @@ jobs:
           git checkout
           mv *.sdk $THEOS/sdks
 
-      - name: Download YouTube Plus (by version)
+      - name: Download YouTube Plus (free release)
         if: ${{ inputs.tweak_version != '' }}
         run: |
-          deb_url="https://github.com/dayanch96/YTLite/releases/download/v${{ inputs.tweak_version }}/com.dvntm.ytlite_${{ inputs.tweak_version }}_iphoneos-arm.deb"
+          deb_url="https://github.com/dayanch96/YTLite/releases/download/v${YTLITE_FREE_VERSION}/com.dvntm.ytlite_${YTLITE_FREE_VERSION}_iphoneos-arm.deb"
           wget "$deb_url" --no-verbose -O ytplus.deb
 
       - name: Download YouTube Plus (by URL)

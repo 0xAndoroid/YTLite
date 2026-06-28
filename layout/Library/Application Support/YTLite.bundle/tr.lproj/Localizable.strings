@@ -1,13 +1,3 @@
-/* Patreon section */
-"SkipLogInAlert" = "Giriş hatırlatmasını kapat";
-"Log-inViaPatreon" = "Patreon ile giriş yap";
-"ManageAccount" = "Hesabı yönet";
-"AccessDenied" = "Erişim reddedildi";
-"LogOut" = "Çıkış yap";
-"LogOutTitle" = "Çıkış yap";
-"LogOutMessage" = "Devam etmek istediğinden emin misin?";
-"FeaturesNotActivated" = "Henüz giriş yapmadın. YouTube Plus özelliklerine erişmek için aktif bir Patreon aboneliğiyle giriş yapman gerekiyor.";
-
 /* Main section */
 "Main" = "Ana";
 "Search" = "Ara";
