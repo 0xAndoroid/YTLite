@@ -1,0 +1,9 @@
+Package: com.andoroid.ytliteunlock
+Name: YTLiteUnlock
+Depends: mobilesubstrate
+Version: 5.2.1
+Architecture: iphoneos-arm64
+Description: Neutralizes the defunct YTLite 5.2.1 activation gate at runtime
+Maintainer: andoroid
+Author: andoroid
+Section: Tweaks
