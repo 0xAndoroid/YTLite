@@ -1,87 +1,108 @@
-// YTLiteUnlock — runtime neutralization of the defunct YTLite 5.2.1 Patreon activation gate.
+// YTLiteUnlock: bypass the defunct YTLite 5.2.1 Patreon settings gate.
 //
-// Ground truth (class-dump / nm / otool / strings of the real 5.2.1 dylib extracted from
-// com.dvntm.ytlite_5.2.1_iphoneos-arm64.deb, fetched from dayanch96/YTLite release v5.2.1):
-//
-//   @interface YTPAPIHelper : NSObject
-//   + (void)verifyAccessWithCompletion:(void (^)(BOOL granted, NSError *error))completion;
-//   @end
-//     - sole method on the class (1 entry in its class method list)
-//     - encoded type: v32@0:8@16@?24  (void, self, SEL, id arg1=block)
-//     - selector string present in __objc_methname: "verifyAccessWithCompletion:"
-//     - implementation @0x1b7128: obfuscated — XOR-decrypts HTTP strings (POST, context,
-//       application/json, Content-Type, server URL) at runtime, holds an atomic one-shot
-//       latch at 0x1207b64, and hits a now-dead licensing server.
-//
-//   @interface DVNSupportersVC : UIViewController <WKNavigationDelegate>
-//   - (void)viewDidLoad;                                   v16@0:8
-//   - (void)webView:didStartProvisionalNavigation:;       v32@0:8@16@24
-//   - (void)webView:didFinishNavigation:;                 v32@0:8@16@24
-//   - (void)webView:didFailProvisionalNavigation:withError:; v40@0:8@16@24@32
-//   - (void).cxx_destruct;                                 v16@0:8
-//   @end
-//     - the supporters/purchase webview shown when access is denied.
-//
-// The completion block's exact arity is obfuscated behind a jump table; the deny-path block
-// invoke (@0xba4ac) tests its argument for nil. To be robust to void(^)(BOOL),
-// void(^)(NSError*), or void(^)(BOOL, NSError*), we invoke completion(YES, nil): under the
-// ARM64/AAPCS calling convention extra arguments are harmlessly ignored, and (YES, nil)
-// means "granted, no error" in every plausible encoding.
-//
-// The gate is NOT in a static initializer (__init_offsets was inspected; 0x1b7128's caller
-// at 0xb82e8 is not among the ctor entries), so it fires at app/settings runtime — after all
-// injected tweak dylibs are loaded by dyld. The %hook therefore installs before the gate runs.
-// As a guard against the theoretical case where YTLite.dylib loads after this unlock dylib
-// (class not yet registered), %init is retried from +load via a short async hop.
+// Binary check, release v5.2.1 arm64:
+//   - YTPAPIHelper does not implement the access-check selector; its only class method is
+//     fetchChannelImageWithChannelID:completion:.
+//   - YTLite already hooks that access-check selector elsewhere and grants it.
+//   - The Patreon lock is in YTPSettingsBuilder: rootTable can route to thanksTable
+//     (logged-out/supporter UI) instead of prefsTable (full settings).
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 
-typedef void (^YTPAccessCompletion)(BOOL granted, NSError *error);
+typedef id (*YTLiteUnlockObjectMessageSend)(id, SEL);
 
-@interface YTPAPIHelper : NSObject
-@end
-
-@interface DVNSupportersVC : UIViewController
-@end
-
-%hook YTPAPIHelper
-
-+ (void)verifyAccessWithCompletion:(YTPAccessCompletion)completion {
-    // Grant immediately; skip the dead licensing server entirely.
-    if (completion) completion(YES, nil);
+static id YTLiteUnlockPrefsTable(id self) {
+    SEL prefsTableSelector = sel_registerName("prefsTable");
+    return ((YTLiteUnlockObjectMessageSend)objc_msgSend)(self, prefsTableSelector);
 }
 
-%end
+static id YTLiteUnlockSettingsTable(id self, SEL _cmd) {
+    return YTLiteUnlockPrefsTable(self);
+}
 
-// Defense-in-depth: if anything still allocates/presents DVNSupportersVC (a second call site,
-// cached state, or a re-check), dismiss it instead of showing the dead purchase webview.
-%hook DVNSupportersVC
+static void YTLiteUnlockSupportersViewDidLoad(UIViewController *self, SEL _cmd) {
+    UIViewController *presentedController = self.navigationController ?: self;
+    UIViewController *presentingController = presentedController.presentingViewController ?: self.presentingViewController;
+    [presentingController dismissViewControllerAnimated:NO completion:nil];
+}
 
-- (void)viewDidLoad {
-    %orig;
-    if (self.presentingViewController) {
-        [self.presentingViewController dismissViewControllerAnimated:NO completion:nil];
+static BOOL YTLiteUnlockReplaceInstanceMethod(Class cls, SEL selector, IMP replacement) {
+    Method method = class_getInstanceMethod(cls, selector);
+    if (!method) {
+        return NO;
+    }
+
+    IMP current = method_getImplementation(method);
+    if (current != replacement) {
+        method_setImplementation(method, replacement);
+    }
+
+    return YES;
+}
+
+static BOOL YTLiteUnlockInstallSettingsGateBypass(void) {
+    Class builderClass = objc_getClass("YTPSettingsBuilder");
+    if (!builderClass) {
+        return NO;
+    }
+
+    SEL prefsTableSelector = sel_registerName("prefsTable");
+    if (!class_getInstanceMethod(builderClass, prefsTableSelector)) {
+        return NO;
+    }
+
+    BOOL installedRootTable = YTLiteUnlockReplaceInstanceMethod(
+        builderClass,
+        sel_registerName("rootTable"),
+        (IMP)YTLiteUnlockSettingsTable
+    );
+
+    BOOL installedThanksTable = YTLiteUnlockReplaceInstanceMethod(
+        builderClass,
+        sel_registerName("thanksTable"),
+        (IMP)YTLiteUnlockSettingsTable
+    );
+
+    return installedRootTable && installedThanksTable;
+}
+
+static BOOL YTLiteUnlockInstallSupportersFallback(void) {
+    Class supportersClass = objc_getClass("DVNSupportersVC");
+    if (!supportersClass) {
+        return NO;
+    }
+
+    return YTLiteUnlockReplaceInstanceMethod(
+        supportersClass,
+        sel_registerName("viewDidLoad"),
+        (IMP)YTLiteUnlockSupportersViewDidLoad
+    );
+}
+
+static void YTLiteUnlockInstallAttempt(NSUInteger attempt) {
+    BOOL installedSettingsGateBypass = YTLiteUnlockInstallSettingsGateBypass();
+    BOOL installedSupportersFallback = YTLiteUnlockInstallSupportersFallback();
+
+    static const NSUInteger minimumRefreshAttempts = 12;
+    static const NSUInteger maximumAttempts = 24;
+    BOOL keepRefreshing = attempt < minimumRefreshAttempts;
+    BOOL missingHook = !installedSettingsGateBypass || !installedSupportersFallback;
+
+    if ((keepRefreshing || missingHook) && attempt + 1 < maximumAttempts) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            YTLiteUnlockInstallAttempt(attempt + 1);
+        });
     }
 }
 
-%end
-
-static void YTLiteUnlockInstall(void) {
-    // %hook uses Logos late binding; %init resolves classes via objc_getClass at call time.
-    // Retry covers the load-order edge case where YTLite.dylib registers the gate classes
-    // after this dylib's first %ctor pass.
-    %init;
-    if (!objc_getClass("YTPAPIHelper") || !objc_getClass("DVNSupportersVC")) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{ YTLiteUnlockInstall(); });
-    }
-}
-
-%ctor {
+__attribute__((constructor))
+static void YTLiteUnlockConstructor(void) {
     @autoreleasepool {
-        NSLog(@"[YTLiteUnlock] neutralizing defunct 5.2.1 activation gate.");
-        YTLiteUnlockInstall();
+        NSLog(@"[YTLiteUnlock] bypassing YTLite 5.2.1 Patreon settings gate.");
+        YTLiteUnlockInstallAttempt(0);
     }
 }
