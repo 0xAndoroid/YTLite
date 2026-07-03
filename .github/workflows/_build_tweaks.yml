@@ -54,8 +54,8 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v6
-        if: ${{ inputs.enable_localization }}
+      - name: Checkout YTLite (provides Unlock521 source)
+        uses: actions/checkout@v6
 
       - name: Install Dependencies
         run: brew install make ldid dpkg
