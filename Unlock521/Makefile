@@ -1,4 +1,8 @@
-THEOS_PACKAGE_SCHEME = rootless
+ifeq ($(ROOTLESS),1)
+THEOS_PACKAGE_SCHEME=rootless
+else ifeq ($(ROOTHIDE),1)
+THEOS_PACKAGE_SCHEME=roothide
+endif
 
 ARCHS = arm64
 TARGET := iphone:clang:16.5:13.0
