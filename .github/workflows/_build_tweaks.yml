@@ -239,8 +239,9 @@ jobs:
           cd ../
           dpkg-deb --root-owner-group -b debdir ytplus.deb
 
-      - name: Build YTLiteUnlock (runtime gate bypass)
+      - name: Build YTLiteUnlock (activation reminder suppression)
         run: |
+          sh Unlock521/tests/verify_companion.sh
           cd Unlock521 && make clean package DEBUG=0 FINALPACKAGE=1
           mv packages/*.deb ../ytliteunlock.deb
 

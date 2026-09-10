@@ -3,7 +3,7 @@ Name: YTLiteUnlock
 Depends: mobilesubstrate
 Version: 5.2.1
 Architecture: iphoneos-arm
-Description: Neutralizes the defunct YTLite 5.2.1 activation gate at runtime
+Description: Suppresses the activation reminder for patched YTLite releases
 Maintainer: andoroid
 Author: andoroid
 Section: Tweaks
