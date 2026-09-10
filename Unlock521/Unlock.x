@@ -1,12 +1,3 @@
-// YTLiteUnlock: bypass the defunct YTLite 5.2.1 Patreon settings gate.
-//
-// Binary check, release v5.2.1 arm64:
-//   - YTPAPIHelper does not implement the access-check selector; its only class method is
-//     fetchChannelImageWithChannelID:completion:.
-//   - YTLite already hooks that access-check selector elsewhere and grants it.
-//   - The Patreon lock is in YTPSettingsBuilder: rootTable can route to thanksTable
-//     (logged-out/supporter UI) instead of prefsTable (full settings).
-
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
@@ -45,8 +36,17 @@ static BOOL YTLiteUnlockReplaceInstanceMethod(Class cls, SEL selector, IMP repla
 
 static BOOL YTLiteUnlockInstallSettingsGateBypass(void) {
     Class builderClass = objc_getClass("YTPSettingsBuilder");
-    if (!builderClass) {
+    Class defaultsClass = objc_getClass("YTLUserDefaults");
+    if (!builderClass || !defaultsClass) {
         return NO;
+    }
+
+    NSUserDefaults *defaults = ((YTLiteUnlockObjectMessageSend)objc_msgSend)(
+        defaultsClass, sel_registerName("standardUserDefaults")
+    );
+    // The activation reminder reads this preference directly, outside the feature gates.
+    if (![defaults boolForKey:@"dontRemindAccess"]) {
+        [defaults setBool:YES forKey:@"dontRemindAccess"];
     }
 
     SEL prefsTableSelector = sel_registerName("prefsTable");
@@ -102,7 +102,6 @@ static void YTLiteUnlockInstallAttempt(NSUInteger attempt) {
 __attribute__((constructor))
 static void YTLiteUnlockConstructor(void) {
     @autoreleasepool {
-        NSLog(@"[YTLiteUnlock] bypassing YTLite 5.2.1 Patreon settings gate.");
         YTLiteUnlockInstallAttempt(0);
     }
 }
