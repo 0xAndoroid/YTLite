@@ -1,0 +1,9 @@
+Package: com.andoroid.youtube-noise-filter
+Name: YouTube Noise Filter
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Native YouTube feed classification service
+Maintainer: 0xAndoroid
+Author: 0xAndoroid
+Section: Tweaks
+Depends: mobilesubstrate, firmware (>= 17.0)
