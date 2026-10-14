@@ -29,6 +29,7 @@ static id Decode(id value) {
 static NSMutableArray<Fixture *> *pending;
 static NSMutableArray<NSDictionary *> *sent;
 static NSMutableSet<NSString *> *active;
+static NSSet<NSString *> *concurrencyIDs;
 static NSUInteger peak, watches;
 static BOOL wrongVideo;
 
@@ -43,7 +44,7 @@ static BOOL wrongVideo;
             watches++;
             self.videoID = self.request.URL.query;
             self.videoID = [self.videoID substringFromIndex:2];
-            [active addObject:self.videoID];
+            if ([concurrencyIDs containsObject:self.videoID]) [active addObject:self.videoID];
             peak = MAX(peak, active.count);
             NSDictionary *player = @{@"videoDetails": @{@"videoId": wrongVideo ? @"WRONGVIDEO1" : self.videoID, @"title": self.videoID, @"author": @"Fixture", @"shortDescription": @"Text } { with \\\" quotes", @"lengthSeconds": @"61"}, @"captions": @{@"playerCaptionsTracklistRenderer": @{@"captionTracks": @[@{}]}}};
             NSMutableData *html = [[@"<script>var ytInitialPlayerResponse = \n" dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
@@ -223,6 +224,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     wrongVideo = NO;
     [service clearVerdicts]; [active removeAllObjects]; peak = 0;
     NSArray *ids = @[@"GGGGGGGGGG1", @"GGGGGGGGGG2", @"GGGGGGGGGG3", @"GGGGGGGGGG4", @"GGGGGGGGGG5", @"GGGGGGGGGG6"];
+    concurrencyIDs = [NSSet setWithArray:ids];
     paid = sent.count;
     for (NSString *videoID in ids) [service judge:videoID];
     Wait(^BOOL { return pending.count == 4; });
@@ -231,7 +233,7 @@ int main(int argc, char **argv) { @autoreleasepool {
         else Wait(^BOOL { return pending.count > 0; });
     }
     Wait(^BOOL { return [service verdictForVideo:ids.lastObject] != nil; });
-    Check(peak == 4, @"Native video concurrency exceeded four");
+    Check(peak == 4, [NSString stringWithFormat:@"Fixture measured %lu concurrent target videos; expected four", (unsigned long)peak]);
     AwaitNew(service, @"HHHHHHHHHH1");
     finished = service.completions;
     [pending.firstObject answer:@{} status:429];
