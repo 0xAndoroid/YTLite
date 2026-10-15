@@ -9,7 +9,7 @@ BOOL NFVideoID(NSString *value);
 @property(nonatomic, readonly) NFContract *contract;
 @property(nonatomic, readonly) NSDictionary *settings;
 @property(nonatomic, readonly) NSString *instructions;
-@property(nonatomic, readonly) NSString *namespace;
+@property(nonatomic, readonly) NSString *verdictNamespace;
 + (instancetype)shared;
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults configuration:(NSURLSessionConfiguration *)configuration keyService:(NSString *)keyService;
 - (BOOL)hasKey;
@@ -22,6 +22,7 @@ BOOL NFVideoID(NSString *value);
 - (NSString *)reasonForVideo:(NSString *)videoID;
 - (NSDictionary *)verdictForVideo:(NSString *)videoID;
 - (void)judge:(NSString *)videoID;
+// Retains the session token until openedVideo:nil owner:nil; the token must not retain a player/view.
 - (void)openedVideo:(NSString *)videoID owner:(id)owner;
 - (void)captions:(NSString *)text video:(NSString *)videoID owner:(id)owner;
 @end

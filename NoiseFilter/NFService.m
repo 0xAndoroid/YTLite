@@ -24,6 +24,7 @@ BOOL NFVideoID(NSString *value) {
     NSTimeInterval _backoff;
     NSString *_openedVideo, *_captionText;
     id _captionOwner;
+    BOOL _hasKey;
 }
 + (instancetype)shared {
     static NFService *service;
@@ -42,6 +43,9 @@ BOOL NFVideoID(NSString *value) {
         _http = [[NFHTTP alloc] initWithConfiguration:configuration];
         _jobs = [NSMutableDictionary new];
         _queue = [NSMutableArray new];
+        _instructions = [_contract guidance:[_store stringForKey:@"instructions"]];
+        _verdictNamespace = [_contract namespaceForGuidance:_instructions];
+        _hasKey = self.key.length > 0;
     }
     return self;
 }
@@ -57,7 +61,7 @@ BOOL NFVideoID(NSString *value) {
     if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &value) != errSecSuccess) return nil;
     return [[NSString alloc] initWithData:CFBridgingRelease(value) encoding:NSUTF8StringEncoding];
 }
-- (BOOL)hasKey { return self.key.length > 0; }
+- (BOOL)hasKey { return _hasKey; }
 - (OSStatus)saveKey:(NSString *)key {
     key = [key stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     OSStatus status;
@@ -74,12 +78,10 @@ BOOL NFVideoID(NSString *value) {
             status = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
         }
     }
-    if (status == errSecSuccess) { _generation++; [self changed:NO]; }
+    if (status == errSecSuccess) { _hasKey = key.length > 0; _generation++; [self changed:NO]; }
     return status;
 }
 - (NSDictionary *)settings { return [_store dictionaryForKey:@"settings"] ?: _contract.defaults; }
-- (NSString *)instructions { return [_contract guidance:[_store stringForKey:@"instructions"]]; }
-- (NSString *)namespace { return [_contract namespaceForGuidance:self.instructions]; }
 - (void)changed:(BOOL)judge {
     [NSNotificationCenter.defaultCenter postNotificationName:NFChanged object:self userInfo:@{@"judge": @(judge)}];
 }
@@ -88,6 +90,8 @@ BOOL NFVideoID(NSString *value) {
     NSString *text = [_contract guidance:instructions];
     if ([text isEqualToString:self.instructions]) return;
     [_store setObject:text forKey:@"instructions"];
+    _instructions = [text copy];
+    _verdictNamespace = [_contract namespaceForGuidance:_instructions];
     [self changed:YES];
     [self upgrade];
 }
@@ -102,7 +106,7 @@ BOOL NFVideoID(NSString *value) {
     [self changed:NO];
 }
 - (BOOL)allowed:(NSString *)videoID { return [_store boolForKey:[@"a:" stringByAppendingString:videoID]]; }
-- (NSString *)cacheKey:(NSString *)videoID { return [NSString stringWithFormat:@"v:%@:%@", self.namespace, videoID]; }
+- (NSString *)cacheKey:(NSString *)videoID { return [NSString stringWithFormat:@"v:%@:%@", self.verdictNamespace, videoID]; }
 - (NSDictionary *)verdictForVideo:(NSString *)videoID {
     NSData *data = [_store dataForKey:[self cacheKey:videoID]];
     return data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
@@ -207,7 +211,7 @@ BOOL NFVideoID(NSString *value) {
     _captionText = nil;
 }
 - (void)captions:(NSString *)text video:(NSString *)videoID owner:(id)owner {
-    if (owner != _captionOwner || ![videoID isEqualToString:_openedVideo] || !text.length) return;
+    if (!owner || owner != _captionOwner || ![videoID isEqualToString:_openedVideo] || !text.length) return;
     _captionText = [text substringToIndex:MIN(text.length, [_contract.limits[@"transcript"] unsignedIntegerValue])];
     [self upgrade];
 }
