@@ -1,0 +1,24 @@
+name: Noise Filter
+
+on:
+  pull_request:
+    paths:
+      - 'NoiseFilter/**'
+      - '.github/workflows/_build_tweaks.yml'
+      - '.github/workflows/noise-filter.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/_build_tweaks.yml
+    with:
+      enable_youpip: false
+      enable_ytuhd: false
+      enable_yq: false
+      enable_ryd: false
+      enable_ytabc: false
+      enable_demc: false
+      enable_localization: false
+      tweak_version: '5.2.2'

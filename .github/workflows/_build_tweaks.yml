@@ -54,7 +54,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout YTLite (provides Unlock521 source)
+      - name: Checkout YTLite companion sources
         uses: actions/checkout@v6
 
       - name: Install Dependencies
@@ -244,6 +244,12 @@ jobs:
           sh Unlock521/tests/verify_companion.sh
           cd Unlock521 && make clean package DEBUG=0 FINALPACKAGE=1
           mv packages/*.deb ../ytliteunlock.deb
+
+      - name: Check and build Noise Filter
+        run: |
+          sh NoiseFilter/tests/check.sh
+          cd NoiseFilter && make clean package DEBUG=0 FINALPACKAGE=1
+          mv packages/*.deb ../noise-filter.deb
 
       - name: Upload built debs as artifacts
         uses: actions/upload-artifact@v7
