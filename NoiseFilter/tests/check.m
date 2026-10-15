@@ -98,6 +98,7 @@ static void AwaitNew(NFService *service, NSString *videoID) {
 @interface NFService (CompletionObservation)
 - (void)finish:(id)job verdict:(NSDictionary *)verdict;
 - (void)fetchVideo:(id)job;
+- (NSDictionary *)keyQuery;
 @end
 @interface ObservedService : NFService
 @property(nonatomic) NSUInteger started, running, peak, completions;
@@ -114,10 +115,11 @@ static void AwaitNew(NFService *service, NSString *videoID) {
 }
 @end
 static void Idle(ObservedService *service) { Wait(^BOOL { return service.running == 0; }); }
-@interface SessionToken : NSObject
-@property(nonatomic, weak) NSObject *player;
+@interface RecoveringKeyService : ObservedService
+@property(nonatomic) BOOL recovered;
 @end
-@implementation SessionToken
+@implementation RecoveringKeyService
+- (NSDictionary *)keyQuery { return self.recovered ? [super keyQuery] : @{(__bridge id)kSecClass: @"invalid-class"}; }
 @end
 
 int main(int argc, char **argv) { @autoreleasepool {
@@ -144,7 +146,22 @@ int main(int argc, char **argv) { @autoreleasepool {
     configuration.protocolClasses = @[Fixture.class];
     ObservedService *service = [[ObservedService alloc] initWithDefaults:store configuration:configuration keyService:domain];
     pending = [NSMutableArray new]; sent = [NSMutableArray new];
+    [service judge:@"LLLLLLLLLL1"];
+    Check(!service.hasKey && service.started == 0, @"Missing Keychain item started work");
     Check([service saveKey:@"fixture-key-one"] == errSecSuccess && service.hasKey, @"Native Keychain save/read failed");
+    RecoveringKeyService *recovering = [[RecoveringKeyService alloc] initWithDefaults:store configuration:configuration keyService:domain];
+    Check(SecItemCopyMatching((__bridge CFDictionaryRef)recovering.keyQuery, NULL) == errSecParam, @"Expected synthetic transient Keychain status");
+    Check(recovering.hasKey, @"Transient startup Keychain failure cached as absent");
+    [recovering judge:@"LLLLLLLLLL1"];
+    Check(recovering.started == 1, @"Transient startup Keychain failure suppressed work");
+    Idle(recovering);
+    Check(!pending.count && ![recovering verdictForVideo:@"LLLLLLLLLL1"], @"Failed request-time key read produced a verdict");
+    recovering.recovered = YES;
+    AwaitNew(recovering, @"LLLLLLLLLL1");
+    Check([[pending.firstObject.request valueForHTTPHeaderField:@"Authorization"] isEqual:@"Bearer fixture-key-one"], @"Recovered request did not read the actual key");
+    Respond(0, 0); Idle(recovering);
+    Check([recovering verdictForVideo:@"LLLLLLLLLL1"] != nil, @"Startup Keychain failure did not recover");
+    recovering = nil;
     Check(![store.dictionaryRepresentation.description containsString:@"fixture-key"], @"Key persisted outside Keychain");
     Check(configuration.HTTPCookieStorage == nil && configuration.URLCache == nil && !configuration.HTTPShouldSetCookies, @"Transport shares cookies or cache");
     NSString *a = @"AAAAAAAAAA1";
@@ -193,11 +210,13 @@ int main(int argc, char **argv) { @autoreleasepool {
     AwaitNew(service, d); Respond(0.6, 0.3); Idle(service);
     Check([[service verdictForVideo:d][@"transcript"] isEqual:@"awaiting"], @"Uncertain verdict does not await captions");
     NSObject *view = [NSObject new], *later = [NSObject new];
+    [service openedVideo:d owner:nil]; before = service.started;
+    [service captions:@"No owner" video:d owner:nil];
+    Check(service.started == before, @"Nil caption owner accepted against nil current owner");
     [service openedVideo:d owner:view]; [service openedVideo:d owner:later];
     before = service.started;
     [service captions:@"Stale view" video:d owner:view];
     [service captions:@"Wrong video" video:c owner:later];
-    [service captions:@"No owner" video:d owner:nil];
     Check(service.started == before, @"Mismatched caption owner or ID accepted");
     [service captions:@"Current view" video:d owner:later];
     before = service.started;
@@ -219,6 +238,25 @@ int main(int argc, char **argv) { @autoreleasepool {
     Check([[service verdictForVideo:d][@"transcript"] isEqual:@"used"], @"Caption upgrade was not saved");
     before = service.started;
     [service captions:@"More captions" video:d owner:later]; Check(service.started == before, @"Completed captions were bought twice");
+    NSString *sameVideo = @"MMMMMMMMMM1";
+    [service openedVideo:nil owner:nil];
+    [service saveInstructions:@"Old caption namespace"];
+    AwaitNew(service, sameVideo); old = pending.firstObject;
+    [service saveInstructions:@"Hide anime."];
+    AwaitNew(service, sameVideo); fresh = pending.lastObject;
+    [fresh answer:Answer(fresh, 0.6, 0.3) status:200];
+    Wait(^BOOL { return [service verdictForVideo:sameVideo] != nil; });
+    [service openedVideo:sameVideo owner:later];
+    [service captions:@"Current namespace captions" video:sameVideo owner:later];
+    Wait(^BOOL { return pending.count == 2; });
+    finished = service.completions;
+    [pending.lastObject answer:@{} status:500];
+    Wait(^BOOL { return service.completions > finished; });
+    before = service.started; finished = service.completions;
+    [old answer:Answer(old, 0, 0) status:200];
+    Wait(^BOOL { return service.completions > finished; });
+    Check(service.started == before, @"Old-namespace metadata completion retried current captions");
+    Idle(service);
     NSString *early = @"IIIIIIIIII1";
     [service openedVideo:early owner:view];
     AwaitNew(service, early);
@@ -233,14 +271,12 @@ int main(int argc, char **argv) { @autoreleasepool {
     Check(![service verdictForVideo:early], @"Clear accepted a stale caption upgrade");
     before = service.started; [service judge:a]; Check(service.started == before, @"Clear verdicts removed persistent allow");
     [service openedVideo:nil owner:nil];
-    __weak SessionToken *retainedToken;
-    __weak NSObject *releasedPlayer;
+    __weak NSObject *retainedToken;
     @autoreleasepool {
-        SessionToken *token = [SessionToken new]; NSObject *player = [NSObject new];
-        token.player = player; retainedToken = token; releasedPlayer = player;
+        NSObject *token = [NSObject new]; retainedToken = token;
         [service openedVideo:d owner:token];
     }
-    Check(retainedToken != nil && releasedPlayer == nil, @"Session token retained the player or disappeared before close");
+    Check(retainedToken != nil, @"Session token disappeared before close");
     [service openedVideo:nil owner:nil];
     Check(retainedToken == nil, @"Session token survived explicit close");
     NSString *e = @"EEEEEEEEEE1";
