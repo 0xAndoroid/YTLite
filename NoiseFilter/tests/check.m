@@ -114,6 +114,11 @@ static void AwaitNew(NFService *service, NSString *videoID) {
 }
 @end
 static void Idle(ObservedService *service) { Wait(^BOOL { return service.running == 0; }); }
+@interface SessionToken : NSObject
+@property(nonatomic, weak) NSObject *player;
+@end
+@implementation SessionToken
+@end
 
 int main(int argc, char **argv) { @autoreleasepool {
     Check(argc == 2, @"Expected parity fixture path");
@@ -192,6 +197,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     before = service.started;
     [service captions:@"Stale view" video:d owner:view];
     [service captions:@"Wrong video" video:c owner:later];
+    [service captions:@"No owner" video:d owner:nil];
     Check(service.started == before, @"Mismatched caption owner or ID accepted");
     [service captions:@"Current view" video:d owner:later];
     before = service.started;
@@ -227,6 +233,16 @@ int main(int argc, char **argv) { @autoreleasepool {
     Check(![service verdictForVideo:early], @"Clear accepted a stale caption upgrade");
     before = service.started; [service judge:a]; Check(service.started == before, @"Clear verdicts removed persistent allow");
     [service openedVideo:nil owner:nil];
+    __weak SessionToken *retainedToken;
+    __weak NSObject *releasedPlayer;
+    @autoreleasepool {
+        SessionToken *token = [SessionToken new]; NSObject *player = [NSObject new];
+        token.player = player; retainedToken = token; releasedPlayer = player;
+        [service openedVideo:d owner:token];
+    }
+    Check(retainedToken != nil && releasedPlayer == nil, @"Session token retained the player or disappeared before close");
+    [service openedVideo:nil owner:nil];
+    Check(retainedToken == nil, @"Session token survived explicit close");
     NSString *e = @"EEEEEEEEEE1";
     for (id invalid in @[@{}, @{@"answers": @[]}, @{@"answers": @[@{@"name": @"noise", @"type": @"refusal"}]}]) {
         AwaitNew(service, e); [pending.firstObject answer:invalid status:200]; Idle(service);
