@@ -153,7 +153,7 @@ BOOL NFVideoID(NSString *value) {
     [_jobs removeObjectForKey:job.identity];
     _active--;
     [self drain];
-    if (verdict && !job.transcript && [job.videoID isEqualToString:_openedVideo]) [self upgrade];
+    if (verdict && !job.transcript && _openedVideo && [job.cacheKey isEqualToString:[self cacheKey:_openedVideo]]) [self upgrade];
 }
 - (BOOL)accept:(NSData *)data response:(NSHTTPURLResponse *)response job:(NFJob *)job {
     if (![self current:job]) return NO;
