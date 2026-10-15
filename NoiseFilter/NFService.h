@@ -3,7 +3,7 @@
 #import <Security/Security.h>
 
 extern NSString *const NFChanged;
-BOOL NFVideoID(NSString *value);
+FOUNDATION_EXPORT BOOL NFVideoID(NSString *value);
 
 @interface NFService : NSObject
 @property(nonatomic, readonly) NFContract *contract;
@@ -22,7 +22,7 @@ BOOL NFVideoID(NSString *value);
 - (NSString *)reasonForVideo:(NSString *)videoID;
 - (NSDictionary *)verdictForVideo:(NSString *)videoID;
 - (void)judge:(NSString *)videoID;
-// Retains the session token until openedVideo:nil owner:nil; the token must not retain a player/view.
+// Retains the session token until replacement or close; the token must not retain a player/view.
 - (void)openedVideo:(NSString *)videoID owner:(id)owner;
 - (void)captions:(NSString *)text video:(NSString *)videoID owner:(id)owner;
 @end

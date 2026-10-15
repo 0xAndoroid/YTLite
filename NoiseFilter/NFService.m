@@ -45,7 +45,7 @@ BOOL NFVideoID(NSString *value) {
         _queue = [NSMutableArray new];
         _instructions = [_contract guidance:[_store stringForKey:@"instructions"]];
         _verdictNamespace = [_contract namespaceForGuidance:_instructions];
-        _hasKey = self.key.length > 0;
+        _hasKey = SecItemCopyMatching((__bridge CFDictionaryRef)self.keyQuery, NULL) != errSecItemNotFound;
     }
     return self;
 }

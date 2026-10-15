@@ -12,6 +12,8 @@ The app requires iOS 17. JavaScriptCore supplies the module's ECMAScript APIs, i
 
 Call `NFService` on the main thread. URLSession delegate completions also run there. Verdicts are JSON data in a separate defaults domain; `v:<guidance hash>:<video ID>` names the exact effective guidance used in the request. Allow choices use separate `a:<video ID>` keys. Instruction changes preserve other namespaces; category/strictness changes only read scores. Key changes and Clear verdicts invalidate old completions.
 
+The integration PR must enforce main-thread access at its call boundary and create the service only after protected data is available; these lifecycle requirements are not implemented by this service-only package. A transient Keychain error is not treated as a missing item, and each request still reads the current key bytes. Synthetic status checks do not prove locked-device behavior.
+
 The generic-password Keychain item uses service `com.andoroid.youtube-noise-filter`, account `openai-api-key`, and `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. No shared access group or synchronization is configured. The key never enters defaults, JavaScriptCore, resources or logs.
 
 At most four video jobs run at once. Each reads a bounded ordinary watch-page player response and JPEG, then calls the contract's fixed Decisions endpoint through an ephemeral URLSession without cookies, URL caching or redirects. Failures are visible and uncached; HTTP 429 delays new jobs without retry timers. Caption upgrades require a matching current view token and preserve the metadata verdict on failure.
