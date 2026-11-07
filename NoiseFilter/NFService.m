@@ -1,4 +1,8 @@
 #import "NFService.h"
+#import <TargetConditionals.h>
+#if TARGET_OS_IOS
+#import <UIKit/UIKit.h>
+#endif
 
 NSString *const NFChanged = @"NFChanged";
 BOOL NFVideoID(NSString *value) {
@@ -9,6 +13,8 @@ BOOL NFVideoID(NSString *value) {
 
 @interface NFJob : NSObject
 @property(nonatomic, copy) NSString *videoID, *guidance, *cacheKey, *identity, *transcript;
+@property(nonatomic, copy) NSDictionary *settings;
+@property(nonatomic, copy) NSString *requestID;
 @property(nonatomic) NSUInteger generation;
 @end
 @implementation NFJob
@@ -25,8 +31,13 @@ BOOL NFVideoID(NSString *value) {
     NSString *_openedVideo, *_captionText;
     id _captionOwner;
     BOOL _hasKey;
+    NSString *_lastError;
 }
 + (instancetype)shared {
+    if (!NSThread.isMainThread) return nil;
+#if TARGET_OS_IOS
+    if (!UIApplication.sharedApplication.protectedDataAvailable) return nil;
+#endif
     static NFService *service;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -44,24 +55,29 @@ BOOL NFVideoID(NSString *value) {
         _jobs = [NSMutableDictionary new];
         _queue = [NSMutableArray new];
         _instructions = [_contract guidance:[_store stringForKey:@"instructions"]];
-        _verdictNamespace = [_contract namespaceForGuidance:_instructions];
-        _hasKey = SecItemCopyMatching((__bridge CFDictionaryRef)self.keyQuery, NULL) != errSecItemNotFound;
+        _verdictNamespace = [_contract namespaceForGuidance:_instructions model:self.settings[@"model"]];
+        _keychainStatus = SecItemCopyMatching((__bridge CFDictionaryRef)self.keyQuery, NULL);
+        _hasKey = _keychainStatus != errSecItemNotFound;
     }
     return self;
 }
 - (void)dealloc { [_http invalidate]; }
 - (NSDictionary *)keyQuery {
     return @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-             (__bridge id)kSecAttrService: _keyService, (__bridge id)kSecAttrAccount: @"openai-api-key"};
+             (__bridge id)kSecAttrService: _keyService, (__bridge id)kSecAttrAccount: @"typesafe-api-key"};
 }
 - (NSString *)key {
     NSMutableDictionary *query = [self.keyQuery mutableCopy];
     query[(__bridge id)kSecReturnData] = @YES;
     CFTypeRef value = NULL;
-    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &value) != errSecSuccess) return nil;
-    return [[NSString alloc] initWithData:CFBridgingRelease(value) encoding:NSUTF8StringEncoding];
+    _keychainStatus = SecItemCopyMatching((__bridge CFDictionaryRef)query, &value);
+    if (_keychainStatus != errSecSuccess) return nil;
+    NSString *key = [[NSString alloc] initWithData:CFBridgingRelease(value) encoding:NSUTF8StringEncoding];
+    if (!key.length) _keychainStatus = errSecDecode;
+    return key;
 }
 - (BOOL)hasKey { return _hasKey; }
+- (BOOL)enabled { return [self.settings[@"sites"][@"youtube"] boolValue]; }
 - (OSStatus)saveKey:(NSString *)key {
     key = [key stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     OSStatus status;
@@ -69,7 +85,9 @@ BOOL NFVideoID(NSString *value) {
         status = SecItemDelete((__bridge CFDictionaryRef)self.keyQuery);
         if (status == errSecItemNotFound) status = errSecSuccess;
     } else {
-        NSDictionary *value = @{(__bridge id)kSecValueData: [key dataUsingEncoding:NSUTF8StringEncoding],
+        NSData *bytes = [key dataUsingEncoding:NSUTF8StringEncoding];
+        if (!bytes) return errSecParam;
+        NSDictionary *value = @{(__bridge id)kSecValueData: bytes,
                                (__bridge id)kSecAttrAccessible: (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly};
         status = SecItemUpdate((__bridge CFDictionaryRef)self.keyQuery, (__bridge CFDictionaryRef)value);
         if (status == errSecItemNotFound) {
@@ -78,27 +96,39 @@ BOOL NFVideoID(NSString *value) {
             status = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
         }
     }
-    if (status == errSecSuccess) { _hasKey = key.length > 0; _generation++; [self changed:NO]; }
+    if (status == errSecSuccess) {
+        _hasKey = key.length > 0;
+        _keychainStatus = _hasKey ? errSecSuccess : errSecItemNotFound;
+        _keyRejected = NO;
+        _lastError = nil;
+        _backoff = 0;
+        _generation++;
+        [self changed:YES];
+    }
     return status;
 }
-- (NSDictionary *)settings { return [_store dictionaryForKey:@"settings"] ?: _contract.defaults; }
+- (NSDictionary *)settings { return [_contract settingsWithDefaults:[_store dictionaryForKey:@"settings"]]; }
 - (void)changed:(BOOL)judge {
     [NSNotificationCenter.defaultCenter postNotificationName:NFChanged object:self userInfo:@{@"judge": @(judge)}];
 }
-- (void)saveSettings:(NSDictionary *)settings { [_store setObject:settings forKey:@"settings"]; [self changed:NO]; }
+- (void)saveSettings:(NSDictionary *)settings {
+    [_store setObject:[_contract settingsOverrides:settings] forKey:@"settings"];
+    _verdictNamespace = [_contract namespaceForGuidance:_instructions model:self.settings[@"model"]];
+    [self changed:YES];
+}
 - (void)saveInstructions:(NSString *)instructions {
     NSString *text = [_contract guidance:instructions];
     if ([text isEqualToString:self.instructions]) return;
     [_store setObject:text forKey:@"instructions"];
     _instructions = [text copy];
-    _verdictNamespace = [_contract namespaceForGuidance:_instructions];
+    _verdictNamespace = [_contract namespaceForGuidance:_instructions model:self.settings[@"model"]];
     [self changed:YES];
     [self upgrade];
 }
 - (void)clearVerdicts {
     for (NSString *key in _store.dictionaryRepresentation) if ([key hasPrefix:@"v:"]) [_store removeObjectForKey:key];
     _generation++;
-    [self changed:NO];
+    [self changed:YES];
 }
 - (void)allow:(NSString *)videoID { if (NFVideoID(videoID)) [_store setBool:YES forKey:[@"a:" stringByAppendingString:videoID]]; [self changed:NO]; }
 - (void)clearAllowed {
@@ -112,14 +142,14 @@ BOOL NFVideoID(NSString *value) {
     return data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
 }
 - (NSString *)reasonForVideo:(NSString *)videoID {
-    return [self allowed:videoID] ? nil : [_contract reason:[self verdictForVideo:videoID] settings:self.settings];
+    return !self.enabled || [self allowed:videoID] ? nil : [_contract reason:[self verdictForVideo:videoID] settings:self.settings];
 }
 - (void)judge:(NSString *)videoID {
-    if (NFVideoID(videoID) && ![self allowed:videoID] && ![self verdictForVideo:videoID]) [self enqueue:videoID transcript:nil];
+    if (self.enabled && NFVideoID(videoID) && ![self allowed:videoID] && ![self verdictForVideo:videoID]) [self enqueue:videoID transcript:nil];
 }
 - (void)enqueue:(NSString *)videoID transcript:(NSString *)transcript {
     NSString *identity = [NSString stringWithFormat:@"%lu:%@:%d", (unsigned long)_generation, [self cacheKey:videoID], transcript != nil];
-    if (_jobs[identity] || !self.hasKey || NSDate.timeIntervalSinceReferenceDate < _backoff) return;
+    if (_jobs[identity] || !self.enabled || !self.hasKey || NSDate.timeIntervalSinceReferenceDate < _backoff) return;
     NFJob *job = [NFJob new];
     job.videoID = videoID;
     job.guidance = self.instructions;
@@ -127,11 +157,12 @@ BOOL NFVideoID(NSString *value) {
     job.identity = identity;
     job.generation = _generation;
     job.transcript = transcript;
+    job.settings = self.settings;
     _jobs[identity] = job;
     [_queue addObject:job];
     [self drain];
 }
-- (BOOL)current:(NFJob *)job { return job.generation == _generation && ![self allowed:job.videoID]; }
+- (BOOL)current:(NFJob *)job { return job.generation == _generation && self.enabled && ![self allowed:job.videoID]; }
 - (void)drain {
     while (_active < 4 && _queue.count) {
         NFJob *job = _queue.firstObject;
@@ -148,19 +179,35 @@ BOOL NFVideoID(NSString *value) {
     if (verdict && [self current:job]) {
         NSData *data = [NSJSONSerialization dataWithJSONObject:verdict options:0 error:nil];
         if (data) [_store setObject:data forKey:job.cacheKey];
-        [self changed:NO];
     }
     [_jobs removeObjectForKey:job.identity];
     _active--;
     [self drain];
+    [self changed:NO];
     if (verdict && !job.transcript && _openedVideo && [job.cacheKey isEqualToString:[self cacheKey:_openedVideo]]) [self upgrade];
 }
 - (BOOL)accept:(NSData *)data response:(NSHTTPURLResponse *)response job:(NFJob *)job {
     if (![self current:job]) return NO;
     if (response.statusCode == 429) {
-        NSTimeInterval seconds = [[response valueForHTTPHeaderField:@"Retry-After"] doubleValue];
-        if (seconds <= 0) seconds = [response.URL.host isEqualToString:@"api.openai.com"] ? 60 : 600;
+        NSString *retryAfter = [response valueForHTTPHeaderField:@"Retry-After"];
+        NSTimeInterval seconds = retryAfter.doubleValue;
+        if (seconds <= 0 && retryAfter.length) {
+            NSDateFormatter *format = [NSDateFormatter new];
+            format.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+            format.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+            format.dateFormat = @"EEE',' dd MMM yyyy HH':'mm':'ss zzz";
+            seconds = [format dateFromString:retryAfter].timeIntervalSinceNow;
+        }
+        if (seconds <= 0) seconds = [response.URL.host isEqualToString:@"api.typesafe.ai"] ? 60 : 600;
         _backoff = MAX(_backoff, NSDate.timeIntervalSinceReferenceDate + seconds);
+    }
+    if ([response.URL.host isEqualToString:@"api.typesafe.ai"]) {
+        if (response.statusCode == 401 || response.statusCode == 403) _keyRejected = YES;
+        if (response.statusCode == 200) _keyRejected = NO;
+    }
+    if (!data || response.statusCode != 200) {
+        _lastError = response ? [NSString stringWithFormat:@"%@ returned HTTP %ld", response.URL.host, (long)response.statusCode]
+                              : @"Network request failed";
     }
     return data != nil && response.statusCode == 200;
 }
@@ -170,7 +217,10 @@ BOOL NFVideoID(NSString *value) {
         if (![self accept:data response:response job:job]) { [self finish:job verdict:nil]; return; }
         NSDictionary *player = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
         NSDictionary *details = [player isKindOfClass:NSDictionary.class] ? player[@"videoDetails"] : nil;
-        if (![details isKindOfClass:NSDictionary.class] || ![details[@"videoId"] isEqual:job.videoID] || ![details[@"title"] isKindOfClass:NSString.class]) { [self finish:job verdict:nil]; return; }
+        if (![details isKindOfClass:NSDictionary.class] || ![details[@"videoId"] isEqual:job.videoID] || ![details[@"title"] isKindOfClass:NSString.class]) {
+            self->_lastError = @"YouTube did not return this video's metadata";
+            [self finish:job verdict:nil]; return;
+        }
         id seconds = details[@"lengthSeconds"];
         double length = [seconds isKindOfClass:NSString.class] || [seconds isKindOfClass:NSNumber.class] ? [seconds doubleValue] : 0;
         NSDictionary *video = @{ @"title": details[@"title"], @"channel": details[@"author"] ?: @"", @"description": details[@"shortDescription"] ?: @"", @"seconds": @(length), @"live": @([details[@"isLiveContent"] isEqual:@YES]) };
@@ -182,28 +232,66 @@ BOOL NFVideoID(NSString *value) {
     }];
 }
 - (void)fetchThumbnail:(NFJob *)job video:(NSDictionary *)video captioned:(BOOL)captioned {
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"https://i.ytimg.com/vi/%@/mqdefault.jpg", job.videoID]];
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"https://i.ytimg.com/vi/%@/hqdefault.jpg", job.videoID]];
     [_http request:[NSURLRequest requestWithURL:url] limit:200000 player:NO reply:^(NSData *data, NSHTTPURLResponse *response) {
         if (![self accept:data response:response job:job] || ![response.MIMEType isEqualToString:@"image/jpeg"]) { [self finish:job verdict:nil]; return; }
-        NSDictionary *body = [self.contract call:@"decisionRequest" arguments:@[video, [data base64EncodedStringWithOptions:0], job.transcript ?: @"", job.guidance]];
+        NSDictionary *body = [self.contract call:@"decisionRequest" arguments:@[video, [data base64EncodedStringWithOptions:0], job.transcript ?: @"", job.guidance, job.settings]];
         NSString *key = self.key;
         if (!body || !key.length) { [self finish:job verdict:nil]; return; }
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:self.contract.endpoint]];
         request.HTTPMethod = @"POST";
         [request setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
         [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        [request setValue:@"true" forHTTPHeaderField:@"TypeSafe-Danger-Zone-Images"];
         request.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+        job.requestID = NSUUID.UUID.UUIDString;
+        [self increment:@"requests" by:1];
         [self->_http request:request limit:1000000 player:NO reply:^(NSData *answer, NSHTTPURLResponse *reply) {
+            id parsed = answer ? [NSJSONSerialization JSONObjectWithData:answer options:NSJSONReadingFragmentsAllowed error:nil] : nil;
+            if (reply.statusCode == 200) {
+                [self increment:@"responses" by:1];
+                id usage = [parsed isKindOfClass:NSDictionary.class] ? parsed[@"usage"] : nil;
+                id tokens = [usage isKindOfClass:NSDictionary.class] ? usage[@"input_tokens"] : nil;
+                if ([tokens isKindOfClass:NSNumber.class] && [tokens doubleValue] >= 0) [self increment:@"inputTokens" by:[tokens unsignedIntegerValue]];
+                else [self increment:@"responsesWithoutUsage" by:1];
+            }
             if (![self accept:answer response:reply job:job]) { [self finish:job verdict:nil]; return; }
-            id parsed = [NSJSONSerialization JSONObjectWithData:answer options:NSJSONReadingFragmentsAllowed error:nil];
             NSMutableDictionary *verdict = [[self.contract call:@"parseDecision" arguments:@[parsed ?: NSNull.null, body[@"questions"]]] mutableCopy];
             if (verdict) {
-                BOOL unsure = [[self.contract call:@"needsTranscript" arguments:@[verdict]] boolValue];
+                BOOL unsure = [[self.contract call:@"needsTranscript" arguments:@[verdict, job.settings]] boolValue];
                 verdict[@"transcript"] = job.transcript ? @"used" : unsure ? (captioned ? @"awaiting" : @"none") : @"not_needed";
-            }
+                verdict[@"model"] = job.settings[@"model"];
+                verdict[@"reportedModel"] = [parsed[@"model"] isKindOfClass:NSString.class] ? parsed[@"model"] : NSNull.null;
+                verdict[@"requestID"] = job.requestID;
+                verdict[@"judgedAt"] = @(NSDate.date.timeIntervalSince1970);
+                self->_lastError = nil;
+            } else self->_lastError = @"TypeSafe returned an invalid judgment";
             [self finish:job verdict:verdict];
         }];
     }];
+}
+- (void)increment:(NSString *)name by:(NSUInteger)value {
+    NSString *key = [@"jev." stringByAppendingString:name];
+    [_store setInteger:[_store integerForKey:key] + value forKey:key];
+}
+- (NSDictionary *)diagnostics {
+    NSMutableDictionary *verdicts = [NSMutableDictionary new];
+    NSString *prefix = [NSString stringWithFormat:@"v:%@:", _verdictNamespace];
+    for (NSString *key in _store.dictionaryRepresentation) {
+        if (![key hasPrefix:prefix]) continue;
+        NSString *videoID = [key substringFromIndex:prefix.length];
+        NSDictionary *verdict = [self verdictForVideo:videoID];
+        if (verdict) verdicts[videoID] = verdict;
+    }
+    return @{@"endpoint": _contract.endpoint, @"model": self.settings[@"model"], @"namespace": _verdictNamespace,
+             @"companionBuild": _contract.revision,
+             @"enabled": @(self.enabled), @"hasKey": @(_hasKey), @"keychainStatus": @(_keychainStatus),
+             @"keyRejected": @(_keyRejected), @"requests": @([_store integerForKey:@"jev.requests"]),
+             @"responses": @([_store integerForKey:@"jev.responses"]), @"inputTokens": @([_store integerForKey:@"jev.inputTokens"]),
+             @"responsesWithoutUsage": @([_store integerForKey:@"jev.responsesWithoutUsage"]),
+             @"active": @(_active), @"queued": @(_queue.count), @"lastError": _lastError ?: NSNull.null,
+             @"blockedUntil": _backoff > NSDate.timeIntervalSinceReferenceDate ? @([NSDate dateWithTimeIntervalSinceReferenceDate:_backoff].timeIntervalSince1970) : NSNull.null,
+             @"verdicts": verdicts};
 }
 - (void)openedVideo:(NSString *)videoID owner:(id)owner {
     _openedVideo = [videoID copy];

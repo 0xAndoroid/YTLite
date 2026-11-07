@@ -1,25 +1,64 @@
 # Noise Filter companion
 
-This first part supplies the native classification service. Feed/caption hooks and the native settings entry belong to the following integration PR; this package alone does not filter the app.
+**Diagnostic checkpoint: this build does not hide Home videos yet.** It provides TypeSafe classification, native Settings and a bounded capture of actual Home row metadata. The remaining dependency is a verified connection between a displayed Home card and its primary video, followed by native layout removal. Simulator fixtures and installation do not satisfy phone filtering acceptance.
 
-## Contract
+This companion lives on the long-lived `noise-filter` branch. Integration PRs target that branch, never `main`. It has no paid-feature source dependency. Its PR workflow builds only this companion.
 
-`verdict.js` is an exact import of `extension/verdict.js` from `0xAndoroid/yt-noise-filter` at `8416a924642c866107c1734bedb75aaed993697a`. Its SHA-256 is `ebdb42863f1960b22942352e195c9ac3faf256759bb9ea9646108c58cef43c5b`. The owner authorized publishing this module in this public fork. `bundle.mjs` rejects changed bytes, removes only ES-module exports, and embeds the module for JavaScriptCore. Prompts, labels, reasons, uncertainty rules, request generation and answer validation are not rewritten in Objective-C.
+## Settings
 
-The app requires iOS 17. JavaScriptCore supplies the module's ECMAScript APIs, including `Object.hasOwn` and `String.prototype.toWellFormed` ([Safari 16.4 release notes](https://developer.apple.com/documentation/safari-release-notes/safari-16_4-release-notes)). It needs no browser globals, fetch, Web Crypto or TextEncoder. SHA-256 and transport stay native.
+Starting on YouTube's existing Settings screen, the companion adds a **Noise filter** navigation button without replacing existing buttons. It opens these controls:
 
-## Native state
+- **TypeSafe API key:** Add, Replace or Remove. Input is secure; no key ships with the app.
+- **Filter Home videos**, category switches, and Lenient / Normal / Strict cutoffs. These settings are prepared for the Home integration; this diagnostic build does not suppress rows.
+- **Custom instructions:** explicit Save, with a 1,000 UTF-16-unit limit.
+- **Activity:** request attempts, HTTP 200 responses, cached judgments, reported input tokens, errors, Clear judgments and Capture Home diagnostics.
 
-Call `NFService` on the main thread. URLSession delegate completions also run there. Verdicts are JSON data in a separate defaults domain; `v:<guidance hash>:<video ID>` names the exact effective guidance used in the request. Allow choices use separate `a:<video ID>` keys. Instruction changes preserve other namespaces; category/strictness changes only read scores. Key changes and Clear verdicts invalidate old completions.
+These labels and controls have a UIKit fixture. Their entry point in the actual YouTube 21.44.4 app still needs the phone checkpoint below. No native caption binding is implemented; the service's existing caption-upgrade API remains available to a future caller.
 
-The integration PR must enforce main-thread access at its call boundary and create the service only after protected data is available; these lifecycle requirements are not implemented by this service-only package. A transient Keychain error is not treated as a missing item, and each request still reads the current key bytes. Synthetic status checks do not prove locked-device behavior.
+## TypeSafe contract and state
 
-The generic-password Keychain item uses service `com.andoroid.youtube-noise-filter`, account `openai-api-key`, and `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. No shared access group or synchronization is configured. The key never enters defaults, JavaScriptCore, resources or logs.
+`verdict.js` is an exact import of `extension/verdict.js` at yt-noise-filter commit `6d3a427826757fd14402a27841e21aeef56281a2`, SHA-256 `c07984593062497bb86d0be560cedc6ec45c6066f498eab67ac3f405f813092a`. The build verifies those bytes, removes ES-module exports and evaluates the module in JavaScriptCore. Shared X helpers remain part of that pinned module but are not called by this companion.
 
-At most four video jobs run at once. Each reads a bounded ordinary watch-page player response and JPEG, then calls the contract's fixed Decisions endpoint through an ephemeral URLSession without cookies, URL caching or redirects. Failures are visible and uncached; HTTP 429 delays new jobs without retry timers. Caption upgrades require a matching current view token and preserve the metadata verdict on failure.
+Requests use [TypeSafe System One](https://docs.typesafe.ai/api/system-one), model `jev-1.14.0`, named choice questions and keyed probability answers. The native transport supplies the required [image opt-in header](https://docs.typesafe.ai/images), a UUID-referenced JPEG and the `hqdefault.jpg` thumbnail route. Requests use an ephemeral URLSession without cookies, URL caching or redirects. At most four video jobs run at once. Failed requests remain uncached. HTTP 429 holds new jobs according to Retry-After seconds or an HTTP date; absent or unusable values use a fallback delay. There is no retry timer.
 
-## Checks and package
+Call `NFService` on main. Its shared instance is created only on main after protected data becomes available. The TypeSafe key uses generic-password service `com.andoroid.youtube-noise-filter`, account `typesafe-api-key`, with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. No shared access group or synchronization is requested. The old `openai-api-key` item is neither read nor migrated. A transient Keychain failure is distinct from absence; interpret `hasKey` together with `keychainStatus`, not as proof of a usable credential.
 
-Run `sh NoiseFilter/tests/check.sh` on macOS with Xcode and Node 22 or later. It compares JavaScriptCore with Node evaluating the imported module and exercises real production service code through fixture NSURLProtocol responses and an isolated Keychain/defaults domain. The fixture never contacts YouTube or OpenAI.
+Defaults hold settings overrides and JSON verdicts, never the key. Verdict namespaces include the endpoint, requested model, video policy and effective instructions; changing category switches or cutoffs reuses scores. Clear judgments removes every verdict namespace, but keeps the key, settings, allow choices and cumulative counters. Key changes and Clear invalidate earlier completions. Each cached result records its local request ID, requested model, provider-reported model when present, and judgment time. The attempt counter counts submissions to the native transport, not proof of receipt by TypeSafe. HTTP responses and valid cached judgments provide separate evidence.
 
-The PR workflow calls `_build_tweaks.yml`, which runs these checks and builds the actual Theos companion. Its `built-debs` artifact includes `noise-filter.deb`; existing main/beta packaging already injects every built `.deb`. Unlock521 and activation behavior are unchanged. Native fixture checks and compilation do not prove live device behavior.
+Builds stamp their Git head into diagnostics, with `-modified` for an uncommitted companion. Requires a Git checkout, iOS 17 or later, Xcode and Node 22 or later.
+
+## Home identity capture
+
+The capture hooks `YTInnerTubeCollectionViewController` display/appearance callbacks after their original implementations. It uses the native section-list `isHomeFeed` predicate and current presentation-to-model index conversion. Exact method encodings are checked before installation; inherited methods are overridden on the target class, not on UIKit's shared superclasses.
+
+**Capture Home diagnostics** arms a one-minute admission window for at most eight visible-row observations. It records row frames and class/getter paths, including the actual collection cell's node and element. Quoted element-proto values are redacted except 11-character video-ID values in video-ID fields and canonical YouTube watch URLs with all other query data removed. It does not export raw element bytes, API keys or custom instructions. Captured IDs remain candidates until correlated with real displayed cards.
+
+The capture does not replace feed models, change item counts, write frames or hidden flags, or call the classifier. It does not invoke the renderer's elementData getter, which can build and cache data through native block execution. Results are written atomically, with complete file protection, to `Documents/NoiseFilter-diagnostics.json` in the app's own container. Capture is opt-in; no automatic capture starts at launch. It has no timer, background polling or upload. Investigation-only capture code will be removed once the production binding is established.
+
+### Required phone checkpoint
+
+Only after coordinator review and merge into `noise-filter`, build the companion from that merged branch and prepare an in-place package. Device actions require the coordinator's separate go; never uninstall the app.
+
+1. Keep the iPhone connected and unlocked. After the authorized install, open the same YouTube app. Do not enter an API key for this identity-only checkpoint.
+2. Starting at YouTube Settings, open **Noise filter** and select **Capture Home diagnostics** under Activity.
+3. Return to Home and scroll through several actual video cards during the next minute. The capture leaves them visible.
+4. Retrieve the single diagnostics file through the authorized app-container route. Check the companion build, hook status, Home callback count and observations before drawing conclusions.
+
+A successful capture proves only an observation path. The final acceptance still requires a key entered through these settings, real successful judgments, actual noise videos removed from Home without gaps, kept cards unchanged, and a non-Home control. A key and judgments with no hiding falsify completion.
+
+## Focused checks and build
+
+From the repository root, with a task-owned build directory:
+
+```sh
+build="$(mktemp -d "${TMPDIR:?}/noise-filter.XXXXXX")"
+sh NoiseFilter/tests/check.sh
+uv run --no-project python NoiseFilter/tests/run-uikit.py "$build"
+make -f NoiseFilter/Native.mk BUILD="$build"
+```
+
+The service fixture uses fake HTTP responses and isolated fake-key Keychain/defaults entries. It checks the shared Node/JavaScriptCore contract, credential and cache generations, caption ownership, concurrency, usage and rate holds. The UIKit fixture uses real UIKit with stand-in YouTube classes, fake Keychain calls and no network. It exercises the actual Settings/hook installers, key and preference actions, rendered instructions, bounded capture/redaction, and unchanged collection geometry. Its task-owned simulator is shut down and deleted afterward. None of these fixtures runs the real YouTube feed or establishes provider access.
+
+`Native.mk` produces an unsigned arm64 `NoiseFilter.dylib`; it compiles no other tweak. The existing Theos Makefile also builds only this companion when invoked in this directory. Do not invoke the repository's shared tweak-packaging helper for this work: it contains separate paid-feature build steps.
+
+For the supplied signed YouTube baseline, replace only `Payload/YouTube.app/Frameworks/NoiseFilter.dylib`, then sign that library and reseal the app with the existing identity and root entitlements. Keep all other executable bytes and nested signatures unchanged. Verify the complete file-backed Mach-O sections of the app executable before/after resealing, exact bytes of every other executable, the existing app/Keychain entitlement slots and the final deep signature. Keep source hashes and signing receipts with the package. The installed app's bundle ID remains `ee.andrew.youtube`.

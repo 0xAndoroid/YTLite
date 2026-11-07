@@ -2,10 +2,9 @@ name: Noise Filter
 
 on:
   pull_request:
+    branches: ['noise-filter']
     paths:
       - 'NoiseFilter/**'
-      - 'Unlock521/**'
-      - '.github/workflows/_build_tweaks.yml'
       - '.github/workflows/noise-filter.yml'
 
 permissions:
@@ -13,13 +12,23 @@ permissions:
 
 jobs:
   build:
-    uses: ./.github/workflows/_build_tweaks.yml
-    with:
-      enable_youpip: false
-      enable_ytuhd: false
-      enable_yq: false
-      enable_ryd: false
-      enable_ytabc: false
-      enable_demc: false
-      enable_localization: false
-      tweak_version: '6.0'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+      - name: Contract and service fixtures
+        run: sh NoiseFilter/tests/check.sh
+      - name: UIKit fixtures
+        run: uv run --no-project python NoiseFilter/tests/run-uikit.py "$RUNNER_TEMP/noise-filter"
+      - name: Build only the companion
+        run: make -f NoiseFilter/Native.mk BUILD="$RUNNER_TEMP/noise-filter"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: noise-filter-companion
+          path: |
+            ${{ runner.temp }}/noise-filter/NoiseFilter.dylib
+            ${{ runner.temp }}/noise-filter/*.png
+            ${{ runner.temp }}/noise-filter/uikit.log

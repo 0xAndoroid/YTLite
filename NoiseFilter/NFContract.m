@@ -6,23 +6,26 @@
 @implementation NFContract {
     JSContext *_context;
     JSValue *_contract;
-    NSDictionary *_judged, *_thresholds;
+    NSDictionary *_judged;
     NSArray *_judgedNames;
+    NSString *_policy;
 }
+- (NSString *)revision { return @(NF_BUILD_REVISION); }
 - (instancetype)init {
     if ((self = [super init])) {
         _context = [JSContext new];
+        _context[@"crypto"] = @{ @"randomUUID": ^NSString *{ return NSUUID.UUID.UUIDString.lowercaseString; } };
         _contract = [_context evaluateScript:@(NFContractSource)];
         if (_context.exception || ![self guidance:@""]) return nil;
         _categories = [[_contract[@"CATEGORIES"] toDictionary] copy];
         _categoryNames = [[_contract[@"categoryNames"] toArray] copy];
         _defaults = [[_contract[@"DEFAULT_SETTINGS"] toDictionary] copy];
         _limits = [[_contract[@"LIMITS"] toDictionary] copy];
-        _endpoint = [[_contract[@"DECISIONS_URL"] toString] copy];
+        _endpoint = [[_contract[@"SYSTEM_ONE_URL"] toString] copy];
         _judged = [[_contract[@"JUDGED"] toDictionary] copy];
         _judgedNames = [[_contract[@"judgedNames"] toArray] copy];
-        _thresholds = [[_contract[@"STRICTNESS"] toDictionary] copy];
-        _strictnessNames = [_thresholds.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) { return [self->_thresholds[b] compare:self->_thresholds[a]]; }];
+        _strictnessNames = [[_context[@"Object"] invokeMethod:@"keys" withArguments:@[_contract[@"DEFAULT_SETTINGS"][@"thresholds"]]] toArray];
+        _policy = [[_context[@"JSON"] invokeMethod:@"stringify" withArguments:@[_contract[@"VIDEO_POLICY"]]] toString];
     }
     return self;
 }
@@ -34,16 +37,24 @@
 - (NSString *)guidance:(NSString *)text {
     return [self call:@"effectiveGuidance" arguments:@[text ?: @""]];
 }
-- (NSString *)namespaceForGuidance:(NSString *)text {
-    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
+- (NSString *)namespaceForGuidance:(NSString *)text model:(NSString *)model {
+    NSString *source = [NSString stringWithFormat:@"%@\n%@\n%@\n%@", _endpoint, model, _policy, [self guidance:text]];
+    NSData *data = [source dataUsingEncoding:NSUTF8StringEncoding];
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];
     CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
     NSMutableString *name = [NSMutableString stringWithCapacity:16];
     for (NSUInteger i = 0; i < 8; i++) [name appendFormat:@"%02x", digest[i]];
     return name;
 }
+- (NSDictionary *)settingsWithDefaults:(NSDictionary *)stored {
+    return [self call:@"withDefaults" arguments:@[stored ?: @{}]];
+}
+- (NSDictionary *)settingsOverrides:(NSDictionary *)settings {
+    return [self call:@"overrides" arguments:@[settings]];
+}
 - (NSString *)reason:(NSDictionary *)verdict settings:(NSDictionary *)settings {
-    NSNumber *selected = _thresholds[settings[@"strictness"] ?: @""];
+    NSString *level = settings[@"strictness"] ?: @"";
+    NSNumber *selected = settings[@"thresholds"][level] ?: _defaults[@"thresholds"][level];
     double threshold = selected ? selected.doubleValue : NAN;
     for (NSString *name in _judgedNames) {
         if (![name isEqualToString:@"custom_instructions"] && ![settings[@"categories"][name] boolValue]) continue;
