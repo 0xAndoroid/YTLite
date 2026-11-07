@@ -7,6 +7,17 @@ static void Wait(BOOL (^ready)(void)) {
     Check(ready(), @"Timed out waiting for native fixture");
 }
 static NSData *JSON(id value) { return [NSJSONSerialization dataWithJSONObject:value options:0 error:nil]; }
+static id Normalize(id value) {
+    if (![value isKindOfClass:NSDictionary.class] || !value[@"assets"]) return value;
+    NSDictionary *assets = value[@"assets"];
+    Check(assets.count == 1, @"Expected one thumbnail asset");
+    NSString *reference = assets.allKeys.firstObject;
+    Check([[NSUUID alloc] initWithUUIDString:reference] != nil && [value[@"state"] containsString:reference], @"Thumbnail has no UUID reference in the state");
+    NSMutableDictionary *normalized = [value mutableCopy];
+    normalized[@"state"] = [value[@"state"] stringByReplacingOccurrencesOfString:reference withString:@"fixture-thumbnail"];
+    normalized[@"assets"] = @{@"fixture-thumbnail": assets[reference]};
+    return normalized;
+}
 static id Decode(id value) {
     if ([value isKindOfClass:NSArray.class]) {
         NSMutableArray *out = [NSMutableArray new];
@@ -29,6 +40,8 @@ static id Decode(id value) {
 static NSMutableArray<Fixture *> *pending;
 static NSMutableArray<NSDictionary *> *sent;
 static BOOL wrongVideo;
+static NSUInteger typeSafeResponses;
+static NSString *retryAfterHeader = @"60";
 
 @implementation Fixture
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { return YES; }
@@ -37,6 +50,7 @@ static BOOL wrongVideo;
     dispatch_async(dispatch_get_main_queue(), ^{
         Check(![self.request valueForHTTPHeaderField:@"Cookie"], @"Cookie leaked into native request");
         NSString *host = self.request.URL.host;
+        if (![host isEqual:@"api.typesafe.ai"]) Check(![self.request valueForHTTPHeaderField:@"Authorization"], @"Key sent to a media host");
         if ([host isEqual:@"www.youtube.com"]) {
             self.videoID = self.request.URL.query;
             self.videoID = [self.videoID substringFromIndex:2];
@@ -46,9 +60,11 @@ static BOOL wrongVideo;
             [html appendData:[@"; throw new Error('must not run');</script>" dataUsingEncoding:NSUTF8StringEncoding]];
             [self send:html status:200 type:@"text/html"];
         } else if ([host isEqual:@"i.ytimg.com"]) {
+            Check([self.request.URL.path hasSuffix:@"/hqdefault.jpg"], @"Thumbnail must meet Jev's minimum image size");
             [self send:[NSData dataWithBytes:"\xff\xd8\xff\xd9" length:4] status:200 type:@"image/jpeg"];
         } else {
-            Check([host isEqual:@"api.openai.com"], @"Unexpected request host");
+            Check([host isEqual:@"api.typesafe.ai"] && [self.request.URL.path isEqual:@"/v1/systemone"], @"Unexpected request endpoint");
+            Check([[self.request valueForHTTPHeaderField:@"TypeSafe-Danger-Zone-Images"] isEqual:@"true"], @"Images opt-in header is missing");
             NSData *body = self.request.HTTPBody;
             if (!body) {
                 NSInputStream *stream = self.request.HTTPBodyStream;
@@ -59,14 +75,15 @@ static BOOL wrongVideo;
                 [stream close]; body = bytes;
             }
             self.body = [NSJSONSerialization JSONObjectWithData:body options:0 error:nil];
-            Check(self.body != nil, @"No Decisions request body");
+            Check([self.body[@"questions"] isKindOfClass:NSDictionary.class] && [self.body[@"assets"] count] == 1, @"No Jev question map or thumbnail");
             [sent addObject:self.body];
             [pending addObject:self];
         }
     });
 }
 - (void)send:(NSData *)bytes status:(NSInteger)status type:(NSString *)type {
-    NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:status HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type": type, @"Retry-After": @"60"}];
+    if (status == 200 && [self.request.URL.host isEqual:@"api.typesafe.ai"]) typeSafeResponses++;
+    NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:status HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type": type, @"Retry-After": retryAfterHeader}];
     [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
     for (NSUInteger i = 0; i < bytes.length; i += 17) [self.client URLProtocol:self didLoadData:[bytes subdataWithRange:NSMakeRange(i, MIN(17, bytes.length - i))]];
     [self.client URLProtocolDidFinishLoading:self];
@@ -79,14 +96,15 @@ static BOOL wrongVideo;
 @end
 
 static NSDictionary *Answer(Fixture *request, double score, double uncertainty) {
-    NSMutableArray *answers = [NSMutableArray new];
-    for (NSDictionary *question in request.body[@"questions"]) {
-        [answers addObject:@{@"name": question[@"name"], @"type": @"choice", @"probabilities": @[
-            @{@"value": question[@"choices"][0][@"value"], @"probability": @(score)},
-            @{@"value": @"uncertain", @"probability": @(uncertainty)},
-            @{@"value": @"no_signal", @"probability": @(1 - score - uncertainty)}]}];
+    NSMutableDictionary *answers = [NSMutableDictionary new];
+    for (NSString *name in request.body[@"questions"]) {
+        NSDictionary *criteria = request.body[@"questions"][name][@"criteria"];
+        NSString *reason = nil;
+        for (NSString *option in criteria) if (![option isEqual:@"no_signal"] && ![option isEqual:@"uncertain"]) { reason = option; break; }
+        answers[name] = @{@"type": @"choice", @"probabilities": @{
+            reason: @(score), @"uncertain": @(uncertainty), @"no_signal": @(1 - score - uncertainty)}};
     }
-    return @{@"answers": answers};
+    return @{@"model": request.body[@"model"], @"answers": answers, @"usage": @{@"input_tokens": @123}};
 }
 static void Respond(double score, double uncertainty) { Fixture *r = pending.firstObject; [r answer:Answer(r, score, uncertainty) status:200]; }
 static void AwaitNew(NFService *service, NSString *videoID) {
@@ -129,10 +147,10 @@ int main(int argc, char **argv) { @autoreleasepool {
     Check(contract && fixtures, @"JavaScriptCore or fixture failed to initialize");
     for (NSDictionary *item in fixtures[@"cases"]) {
         id result = [contract call:item[@"name"] arguments:Decode(item[@"args"])];
-        Check([(result ?: NSNull.null) isEqual:item[@"expected"]], [@"Native contract parity: " stringByAppendingString:item[@"name"]]);
+        Check([(Normalize(result) ?: NSNull.null) isEqual:item[@"expected"]], [@"Native contract parity: " stringByAppendingString:item[@"name"]]);
     }
     Check([contract.categories isEqual:fixtures[@"categories"]] && [contract.defaults isEqual:fixtures[@"defaults"]], @"Labels/settings differ from original module");
-    Check([[contract namespaceForGuidance:[contract guidance:Decode(fixtures[@"guidance"])]] isEqual:fixtures[@"hash"]], @"Unicode guidance hash differs from request text");
+    Check([[contract namespaceForGuidance:[contract guidance:Decode(fixtures[@"guidance"])] model:contract.defaults[@"model"]] isEqual:fixtures[@"hash"]], @"Namespace differs from model/policy/guidance");
     NSDictionary *verdict = @{@"scores": @{@"noise": @0.8}, @"reasons": @{@"noise": @"clickbait"}};
     for (NSString *strictness in contract.strictnessNames) {
         NSDictionary *settings = @{@"categories": @{@"noise": @YES}, @"strictness": strictness};
@@ -169,7 +187,9 @@ int main(int argc, char **argv) { @autoreleasepool {
     Check(service.started == before, @"Duplicate video request did not join");
     Respond(0.8, 0); Idle(service);
     before = service.started;
-    [service saveSettings:@{@"categories": @{}, @"strictness": @"strict"}];
+    NSMutableDictionary *categories = [NSMutableDictionary new];
+    for (NSString *name in contract.categoryNames) categories[name] = @NO;
+    [service saveSettings:@{@"categories": categories, @"strictness": @"strict"}];
     Check(![service reasonForVideo:a] && service.started == before, @"Switches re-requested or did not re-render");
     [service saveInstructions:@"  Hide anime.\n"];
     AwaitNew(service, a); Respond(1, 0); Idle(service);
@@ -263,7 +283,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     [service captions:@"Captions before the verdict" video:early owner:view];
     Respond(0.6, 0.3);
     Wait(^BOOL { return pending.count == 1; });
-    Check([pending.firstObject.body[@"input"][0][@"content"] count] == 4, @"Early captions were not retained for the view");
+    Check([pending.firstObject.body[@"state"] containsString:@"<transcript>\nCaptions before the verdict\n</transcript>"], @"Early captions were not retained for the view");
     [service clearVerdicts];
     finished = service.completions;
     Respond(1, 0);
@@ -286,11 +306,13 @@ int main(int argc, char **argv) { @autoreleasepool {
     }
     AwaitNew(service, e); [pending.firstObject answer:@{} status:500]; Idle(service);
     AwaitNew(service, e); [pending.firstObject answer:@{} status:401]; Idle(service);
+    Check(service.keyRejected, @"Current TypeSafe rejection is not visible to Settings");
     AwaitNew(service, e);
     Fixture *network = pending.firstObject; [pending removeObject:network];
     [network.client URLProtocol:network didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorNetworkConnectionLost userInfo:nil]];
     Idle(service);
     AwaitNew(service, e); Respond(0, 0); Idle(service);
+    Check(!service.keyRejected, @"Successful current-key response did not clear its rejection");
     wrongVideo = YES;
     before = service.started;
     [service judge:@"FFFFFFFFFF1"]; Idle(service);
@@ -309,13 +331,26 @@ int main(int argc, char **argv) { @autoreleasepool {
     }
     Idle(service);
     Check(service.peak == 4, @"Actual native job concurrency must reach four without exceeding it");
+    NSDateFormatter *httpDate = [NSDateFormatter new];
+    httpDate.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    httpDate.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    httpDate.dateFormat = @"EEE',' dd MMM yyyy HH':'mm':'ss zzz";
+    retryAfterHeader = [httpDate stringFromDate:[NSDate dateWithTimeIntervalSinceNow:300]];
     AwaitNew(service, @"HHHHHHHHHH1");
     finished = service.completions;
     [pending.firstObject answer:@{} status:429];
     Wait(^BOOL { return service.completions > finished; });
+    Check([service.diagnostics[@"blockedUntil"] doubleValue] > NSDate.date.timeIntervalSince1970 + 240, @"An HTTP-date Retry-After was shortened to the fallback delay");
     before = service.started;
     [service judge:@"HHHHHHHHHH2"];
     Check(service.started == before, @"429 did not stop new jobs");
+    Check([service saveKey:@"fixture-key-after-rate"] == errSecSuccess, @"Replacement key failed");
+    AwaitNew(service, @"HHHHHHHHHH2"); Respond(0, 0); Idle(service);
+    NSDictionary *diagnostics = service.diagnostics;
+    Check([diagnostics[@"requests"] unsignedIntegerValue] == sent.count && [diagnostics[@"responses"] unsignedIntegerValue] == typeSafeResponses,
+          @"Counters do not match the transport's actual requests and successful responses");
+    Check([diagnostics[@"verdicts"][@"HHHHHHHHHH2"][@"model"] isEqual:@"jev-1.14.0"], @"Cached verdict does not identify its actual model");
+    Check(![[[NSString alloc] initWithData:JSON(diagnostics) encoding:NSUTF8StringEncoding] containsString:@"fixture-key"], @"Diagnostics contain a credential");
     NFHTTP *bounded = [[NFHTTP alloc] initWithConfiguration:configuration];
     __block BOOL boundedDone = NO;
     [bounded request:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.youtube.com/watch?v=JJJJJJJJJJ1"]] limit:64 player:NO reply:^(NSData *data, NSHTTPURLResponse *response) {
