@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'NoiseFilter/**'
+      - 'Unlock521/**'
       - '.github/workflows/_build_tweaks.yml'
       - '.github/workflows/noise-filter.yml'
 
@@ -21,4 +22,4 @@ jobs:
       enable_ytabc: false
       enable_demc: false
       enable_localization: false
-      tweak_version: '5.2.2'
+      tweak_version: '6.0'

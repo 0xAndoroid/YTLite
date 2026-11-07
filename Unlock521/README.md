@@ -1,7 +1,7 @@
 # Unlock
 
 The build helper patches the upstream package before IPA injection/signing.
-Supported inputs: unmodified YTLite 5.2.1 and 5.2.2 `iphoneos-arm` release
+Supported inputs: unmodified YTLite 5.2.1, 5.2.2 and 6.0 `iphoneos-arm` release
 packages (containing arm64 binaries).
 Other binaries stop the build; offsets are checked against the full SHA-256.
 

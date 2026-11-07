@@ -16,19 +16,27 @@ RELEASES = {
         "5.2.2",
         ((0x238E8, 0x2396C), (0x23A84, 0x23B08), (0x234A4, 0x23528)),
     ),
+    "a697e0397db6df0a223fc3e7080f6b32f1d023ba1a34340140d4c600db6df7c2": (
+        "6.0",
+        ((0xC1FF8, 0xC22AC), (0xC2CC0, 0xC2FD4)),
+    ),
 }
 
 
 def patch_binary(data):
     release = RELEASES.get(hashlib.sha256(data).hexdigest())
     if release is None:
-        raise ValueError("Unsupported YTLite binary; expected an unmodified 5.2.1 or 5.2.2 arm64 release")
+        raise ValueError("Unsupported YTLite binary; expected an unmodified 5.2.1, 5.2.2 or 6.0 arm64 release")
 
     version, branches = release
     patched = bytearray(data)
     # Keep the existing preference reads and main-queue dispatch, skipping only their gates.
     for source, target in branches:
         struct.pack_into("<I", patched, source, 0x14000000 | ((target - source) // 4))
+    if version == "6.0":
+        # 6.0 registration only defers callbacks. Tail-call dispatch_async(main, block):
+        # mov x1,x0; adrp x0,0x20c1000; ldr x0,[x0,#0x870]; b 0x17a4098
+        patched[0xBF314:0xBF324] = bytes.fromhex("e10300aa 000001d0 003844f9 5e935b14")
     return version, patched
 
 

@@ -20,18 +20,18 @@ from patch_tweak import patch_binary
 
 lief.logging.disable()
 
-KEY = 0x2601000
-DEFAULTS = 0x2602000
-BLOCK = 0x2603000
-RETURN = 0x3000000
-STACK = 0x3100000
+KEY = 0x4001000
+DEFAULTS = 0x4002000
+BLOCK = 0x4003000
+RETURN = 0x4300000
+STACK = 0x4400000
 
 
 class Runtime:
     def __init__(self, data, version, value=1, ready=False, locked=False, access=False):
         self.binary = lief.MachO.parse(list(data)).at(0)
         self.vm = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
-        self.vm.mem_map(0, 0x4000000)
+        self.vm.mem_map(0, 0x5000000)
         for segment in self.binary.segments:
             if segment.file_size:
                 self.vm.mem_write(segment.virtual_address, bytes(segment.content))
@@ -40,7 +40,7 @@ class Runtime:
                 self.vm.mem_write(relocation.address, struct.pack("<Q", relocation.target))
         self.imports = {}
         for index, binding in enumerate(self.binary.bindings):
-            address = 0x2800000 + index * 8
+            address = 0x4200000 + index * 8
             self.vm.mem_write(binding.address, struct.pack("<Q", address))
             self.imports[address] = binding.symbol.name
 
@@ -48,9 +48,12 @@ class Runtime:
         if version == "5.2.1":
             self.vm.mem_write(0x1209C10, bytes([access, locked, ready]))
             once = 0x1209C38
-        else:
+        elif version == "5.2.2":
             self.vm.mem_write(0x1225D10, bytes([ready, locked]))
             once = 0x1225D30
+        else:
+            self.vm.mem_write(0x2363040, bytes([locked]))
+            once = 0x2363080
         self.vm.mem_write(once, struct.pack("<q", -1))
         self.version = version
         self.value = value
@@ -65,7 +68,8 @@ class Runtime:
         self.vm.reg_write(UC_ARM64_REG_PC, self.vm.reg_read(UC_ARM64_REG_LR))
 
     def hook(self, vm, address, size, data):
-        if self.version == "5.2.2" and address == 0x239C8:
+        if ((self.version == "5.2.2" and address == 0x239C8)
+                or (self.version == "6.0" and address == 0xC24BC)):
             self.return_value(self.access)
             return
         name = self.imports.get(address)
@@ -92,14 +96,21 @@ class Runtime:
                 raise AssertionError(f"Unexpected selector: {selector}")
         elif name == "_dispatch_async":
             assert self.imports[x0] == "__dispatch_main_q", "Hook installation left the main queue"
-            captured, = struct.unpack("<Q", bytes(vm.mem_read(x1 + 32, 8)))
+            if self.version == "6.0":
+                captured = x1
+            else:
+                captured, = struct.unpack("<Q", bytes(vm.mem_read(x1 + 32, 8)))
             self.queued.append(captured)
         else:
             raise AssertionError(f"Unexpected import: {name}")
         self.return_value(result)
 
     def call(self, symbol, argument):
-        address = self.binary.get_symbol(symbol).export_info.address
+        if self.version == "6.0":
+            # These functions are no longer exported; patch_binary pins the full binary hash.
+            address = {"_ytpBool": 0xC1DDC, "_ytpInt": 0xC2AA4, "_ptnRegisterBlock": 0xBF314}[symbol]
+        else:
+            address = self.binary.get_symbol(symbol).export_info.address
         self.vm.reg_write(UC_ARM64_REG_SP, STACK)
         self.vm.reg_write(UC_ARM64_REG_LR, RETURN)
         self.vm.reg_write(UC_ARM64_REG_X0, argument)
@@ -125,8 +136,9 @@ def verify(data):
     for ready in (False, True):
         runtime = Runtime(data, version, ready=ready)
         runtime.call("_ptnRegisterBlock", BLOCK)
-        assert runtime.queued == ([BLOCK] if ready else [])
-        assert runtime.deferred == ([] if ready else [BLOCK])
+        dispatches = ready and version != "6.0"
+        assert runtime.queued == ([BLOCK] if dispatches else [])
+        assert runtime.deferred == ([] if dispatches else [BLOCK])
         runtime = Runtime(patched, version, ready=ready)
         runtime.call("_ptnRegisterBlock", BLOCK)
         assert runtime.queued == [BLOCK]
