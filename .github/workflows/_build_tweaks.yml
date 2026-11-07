@@ -245,12 +245,6 @@ jobs:
           cd Unlock521 && make clean package DEBUG=0 FINALPACKAGE=1
           mv packages/*.deb ../ytliteunlock.deb
 
-      - name: Check and build Noise Filter
-        run: |
-          sh NoiseFilter/tests/check.sh
-          cd NoiseFilter && make clean package DEBUG=0 FINALPACKAGE=1
-          mv packages/*.deb ../noise-filter.deb
-
       - name: Upload built debs as artifacts
         uses: actions/upload-artifact@v7
         with:
