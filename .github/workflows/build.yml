@@ -1,12 +1,10 @@
-name: Noise Filter
+name: Build packages
 
 on:
   pull_request:
     paths:
-      - 'NoiseFilter/**'
       - 'Unlock521/**'
-      - '.github/workflows/_build_tweaks.yml'
-      - '.github/workflows/noise-filter.yml'
+      - '.github/workflows/**'
 
 permissions:
   contents: read
