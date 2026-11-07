@@ -2,11 +2,13 @@
 #import "NFRuntime.h"
 #import "NFService.h"
 #import <UIKit/UIKit.h>
+#import <CommonCrypto/CommonDigest.h>
 #import <objc/message.h>
 
 static IMP OriginalDisplay, OriginalAppearance;
 static __weak NFService *Service;
 static NSMutableArray *Samples;
+static NSDictionary *Snapshot;
 static NSUInteger HomeDisplays;
 static NSTimeInterval CaptureUntil;
 static BOOL Scheduled;
@@ -79,7 +81,31 @@ NSDictionary *NFHomeDiagnostics(void) {
     return @{@"phase": @"identity-checkpoint", @"filteringImplemented": @NO,
              @"hooksInstalled": @((BOOL)(OriginalDisplay && OriginalAppearance)),
              @"homeDisplayCallbacks": @(HomeDisplays), @"captureUntil": @(CaptureUntil),
+             @"collectionSnapshot": Snapshot ?: NSNull.null,
              @"observations": Samples ? [Samples copy] : @[]};
+}
+static void CaptureImage(UICollectionView *collection) {
+    CGSize size = collection.bounds.size;
+    if (!(size.width > 0 && size.height > 0)) { Snapshot = @{@"error": @"Home viewport is empty"}; return; }
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat formatForTraitCollection:collection.traitCollection];
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:format];
+    NSData *png = [renderer PNGDataWithActions:^(UIGraphicsImageRendererContext *context) {
+        [collection drawViewHierarchyInRect:CGRectMake(0, 0, collection.bounds.size.width, collection.bounds.size.height) afterScreenUpdates:YES];
+    }];
+    NSString *file = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"NoiseFilter-Home.png"];
+    NSError *error;
+    if (!png || ![png writeToFile:file options:NSDataWritingAtomic | NSDataWritingFileProtectionComplete error:&error]) {
+        Snapshot = @{@"error": error.localizedDescription ?: @"Collection snapshot unavailable"};
+        return;
+    }
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(png.bytes, (CC_LONG)png.length, digest);
+    NSMutableString *hash = [NSMutableString new];
+    for (NSUInteger i = 0; i < sizeof(digest); i++) [hash appendFormat:@"%02x", digest[i]];
+    CGRect bounds = collection.bounds;
+    Snapshot = @{@"file": @"NoiseFilter-Home.png", @"sha256": hash, @"at": @(NSDate.date.timeIntervalSince1970),
+                 @"bounds": @[@(bounds.origin.x), @(bounds.origin.y), @(bounds.size.width), @(bounds.size.height)],
+                 @"scale": @(format.scale)};
 }
 static BOOL WriteDiagnostics(NSError **error) {
     NSMutableDictionary *snapshot = [Service.diagnostics mutableCopy];
@@ -95,6 +121,7 @@ BOOL NFCaptureHome(NFService *service, NSError **error) {
     if (!NSThread.isMainThread || !service) return NO;
     Service = service;
     Samples = [NSMutableArray new];
+    Snapshot = nil;
     CaptureUntil = NSDate.date.timeIntervalSince1970 + 60;
     return WriteDiagnostics(error);
 }
@@ -109,6 +136,7 @@ static void Capture(id controller) {
         if (!owner || !Home(owner) || NSDate.date.timeIntervalSince1970 >= CaptureUntil) return;
         UICollectionView *collection = Object(owner, @"collectionView");
         if (![collection isKindOfClass:UICollectionView.class]) return;
+        [collection layoutIfNeeded];
         NSArray *indices = [collection.indexPathsForVisibleItems sortedArrayUsingSelector:@selector(compare:)];
         for (NSIndexPath *index in indices) {
             if (Samples.count >= 8 || NSDate.date.timeIntervalSince1970 >= CaptureUntil) break;
@@ -133,6 +161,7 @@ static void Capture(id controller) {
                 @"cellController": Describe(item, 4, visited, &remaining),
                 @"node": Describe(Object(cell, @"node"), 4, visited, &remaining)}];
         }
+        if (Samples.count && !Snapshot) CaptureImage(collection);
         WriteDiagnostics(NULL);
     });
 }

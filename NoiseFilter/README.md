@@ -33,7 +33,7 @@ The capture hooks `YTInnerTubeCollectionViewController` display/appearance callb
 
 **Capture Home diagnostics** arms a one-minute admission window for at most eight visible-row observations. It records row frames and class/getter paths, including the actual collection cell's node and element. Quoted element-proto values are redacted except 11-character video-ID values in video-ID fields and canonical YouTube watch URLs with all other query data removed. It does not export raw element bytes, API keys or custom instructions. Captured IDs remain candidates until correlated with real displayed cards.
 
-The capture does not replace feed models, change item counts, write frames or hidden flags, or call the classifier. It does not invoke the renderer's elementData getter, which can build and cache data through native block execution. Results are written atomically, with complete file protection, to `Documents/NoiseFilter-diagnostics.json` in the app's own container. Capture is opt-in; no automatic capture starts at launch. It has no timer, background polling or upload. Investigation-only capture code will be removed once the production binding is established.
+The capture does not replace feed models, change item counts, write frames or hidden flags, or call the classifier. It does not invoke the renderer's elementData getter, which can build and cache data through native block execution. Results are written atomically, with complete file protection, to `Documents/NoiseFilter-diagnostics.json` in the app's own container. The first observed viewport also writes `Documents/NoiseFilter-Home.png`, a snapshot of the Home collection only. Its SHA-256, capture time, bounds in points and image scale are recorded in the JSON, so candidate IDs can be compared with the displayed cards. This image can contain personal feed content and stays local; it is not a full-device screenshot. Capture is opt-in; no automatic capture starts at launch. It has no timer, background polling or upload. Investigation-only capture code will be removed once the production binding is established.
 
 ### Required phone checkpoint
 
@@ -42,7 +42,7 @@ Only after coordinator review and merge into `noise-filter`, build the companion
 1. Keep the iPhone connected and unlocked. After the authorized install, open the same YouTube app. Do not enter an API key for this identity-only checkpoint.
 2. Starting at YouTube Settings, open **Noise filter** and select **Capture Home diagnostics** under Activity.
 3. Return to Home and scroll through several actual video cards during the next minute. The capture leaves them visible.
-4. Retrieve the single diagnostics file through the authorized app-container route. Check the companion build, hook status, Home callback count and observations before drawing conclusions.
+4. Retrieve the diagnostics JSON and matched Home PNG through the authorized app-container route. Check the companion build, hook status, Home callback count and observations before drawing conclusions.
 
 A successful capture proves only an observation path. The final acceptance still requires a key entered through these settings, real successful judgments, actual noise videos removed from Home without gaps, kept cards unchanged, and a non-Home control. A key and judgments with no hiding falsify completion.
 

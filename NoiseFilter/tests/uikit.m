@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <CommonCrypto/CommonDigest.h>
 #import "NFHome.h"
 #import "NFService.h"
 #import "NFSettingsViewController.h"
@@ -282,13 +283,25 @@ static void RunChecks(void) {
     Check(first.size.height == 180 && first.size.width == 320, @"Diagnostics changed a native row's size");
     [home.collectionView scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:7 inSection:0] atScrollPosition:UICollectionViewScrollPositionBottom animated:NO];
     [home.collectionView layoutIfNeeded];
-    Wait(^BOOL { return [NFHomeDiagnostics()[@"observations"] count] == 8; });
-    Screenshot(@"home-diagnostic.png");
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSData *saved = [NSData dataWithContentsOfFile:[documents stringByAppendingPathComponent:@"NoiseFilter-diagnostics.json"]];
+    NSString *diagnosticsFile = [documents stringByAppendingPathComponent:@"NoiseFilter-diagnostics.json"];
+    Wait(^BOOL {
+        NSData *data = [NSData dataWithContentsOfFile:diagnosticsFile];
+        NSDictionary *published = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        return [published[@"home"][@"observations"] count] == 8;
+    });
+    Screenshot(@"home-diagnostic.png");
+    NSData *saved = [NSData dataWithContentsOfFile:diagnosticsFile];
     NSString *json = [[NSString alloc] initWithData:saved encoding:NSUTF8StringEncoding];
     Check([json containsString:@"AAAAAAAAAA1"] && [json containsString:@"<redacted>"] &&
           ![json containsString:@"fixture-private"] && ![json containsString:@"fixture-key"], @"Home export lost identity or leaked a key/private/truncated string");
+    NSDictionary *snapshot = NFHomeDiagnostics()[@"collectionSnapshot"];
+    NSData *image = [NSData dataWithContentsOfFile:[documents stringByAppendingPathComponent:snapshot[@"file"]]];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(image.bytes, (CC_LONG)image.length, digest);
+    NSMutableString *hash = [NSMutableString new];
+    for (NSUInteger i = 0; i < sizeof(digest); i++) [hash appendFormat:@"%02x", digest[i]];
+    Check([UIImage imageWithData:image] != nil && [hash isEqual:snapshot[@"sha256"]], @"Published diagnostics do not identify the completed Home snapshot");
     [saved writeToFile:[documents stringByAppendingPathComponent:@"home-diagnostics.json"] atomically:YES];
     NSUInteger calls = [NFHomeDiagnostics()[@"homeDisplayCallbacks"] unsignedIntegerValue];
     home.delegate.isHomeFeed = NO;
