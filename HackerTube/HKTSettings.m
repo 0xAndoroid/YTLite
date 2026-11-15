@@ -39,7 +39,7 @@ static IMP OriginalOrder, OriginalCategories, OriginalUpdate;
 
 static NSArray<NSNumber *> *Order(id self, SEL _cmd) {
     NSArray<NSNumber *> *order = ((NSArray *(*)(id, SEL))OriginalOrder)(self, _cmd);
-    if (![order isKindOfClass:NSArray.class] || [order containsObject:@(Section)]) return order;
+    if (![order isKindOfClass:NSArray.class]) return order;
     NSUInteger anchor = [order indexOfObject:@1];
     NSMutableArray<NSNumber *> *result = [order mutableCopy];
     [result insertObject:@(Section) atIndex:anchor == NSNotFound ? order.count : anchor + 1];
@@ -55,8 +55,7 @@ static NSArray<NSNumber *> *Categories(id self, SEL _cmd) {
         return ((NSArray *(*)(id, SEL))OriginalCategories)(self, _cmd);
     }
     NSArray<NSNumber *> *categories = ((NSArray *(*)(id, SEL))OriginalCategories)(self, _cmd);
-    if ([(id<HKTSettingsGroupData>)self type] != AccountGroup || ![categories isKindOfClass:NSArray.class]
-        || [categories containsObject:@(Section)]) return categories;
+    if ([(id<HKTSettingsGroupData>)self type] != AccountGroup || ![categories isKindOfClass:NSArray.class]) return categories;
     return [@[@(Section)] arrayByAddingObjectsFromArray:categories];
 }
 
@@ -84,7 +83,6 @@ static void Update(id self, SEL _cmd, NSUInteger category, id entry) {
 }
 
 BOOL HKTInstallSettings(void) {
-    if (OriginalUpdate) return YES;
     Class presentation = NSClassFromString(@"YTAppSettingsPresentationData");
     Class groups = NSClassFromString(@"YTSettingsGroupData");
     Class manager = NSClassFromString(@"YTSettingsSectionItemManager");

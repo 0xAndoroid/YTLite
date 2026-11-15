@@ -14,16 +14,17 @@ Settings list.
 
 ## Dependencies
 
-- **hackertube.org is reachable.** Nothing is cached. When the page cannot load, Home shows a
-  message with a Retry button.
+- **hackertube.org is reachable.** The library keeps no offline copy of the page. When the page
+  cannot load, Home shows a message with a Retry button.
 - **The site's cards stay links to a video.** A link to `/watch/<video id>` on the site, or to
   `youtube.com/watch?v=<video id>`, opens the native player; the id must be 11 characters of
   `A-Z a-z 0-9 _ -`. Other links on the site stay in the web view, tapped links to other sites
   open outside the app, and nothing else can take the web view off the site.
 - **The site follows same-site links from a click listener on the document.** The library
   registers its own listener first and keeps watch links away from the site's, so the tap becomes
-  a navigation that the library hands to the player. If the site starts handling card taps
-  elsewhere, a tap shows the site's own watch page with its embedded player.
+  a navigation that the library hands to the player. If the site starts handling card taps in a
+  listener that runs before the library's, such as one on the card itself, a tap shows the site's
+  own watch page with its embedded player.
 - **YouTube keeps the members listed in `HKTHome.m` and `HKTSettings.m`**, read from the 21.44.4
   executable: the browse page's request method and `FEwhat_to_watch` identifier, the command
   event that opens a watch endpoint, and the Settings section calls. Each is looked up by name and

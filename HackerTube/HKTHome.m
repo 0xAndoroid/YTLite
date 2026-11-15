@@ -110,13 +110,11 @@ BOOL HKTHomeSupported(void) {
         && HKTMethod(events, @protocol(HKTCommandEvent), @selector(send), YES);
 }
 
-BOOL HKTInstallHome(void) {
-    if (OriginalRequest) return YES;
-    if (!HKTHomeSupported()) return NO;
+void HKTInstallHome(void) {
+    if (!HKTHomeSupported()) return;
     Class browse = NSClassFromString(@"YTBrowseViewController");
     Protocol *shape = @protocol(HKTBrowseViewController);
     HeaderKnown = HKTMethod(NSClassFromString(@"YTHeaderContentComboView"), @protocol(HKTHeaderContentComboView), @selector(headerView), YES) != NULL;
     HKTReplace(browse, shape, @selector(makeRequestForRefresh:disablePrepareToRefresh:nonContinuationRefresh:), YES, (IMP)Request, &OriginalRequest);
     HKTReplace(browse, shape, @selector(viewWillAppear:), YES, (IMP)Appear, &OriginalAppear);
-    return YES;
 }

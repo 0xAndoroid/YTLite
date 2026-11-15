@@ -47,6 +47,7 @@ static NSString *const WatchLinkScript =
         initWithSource:WatchLinkScript injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
     _webView = [[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration];
     _webView.navigationDelegate = self;
+    // Until the page paints, the view behind shows instead of WebKit's white.
     _webView.opaque = NO;
     _webView.backgroundColor = UIColor.clearColor;
     // A link preview would render the site's own watch page.
