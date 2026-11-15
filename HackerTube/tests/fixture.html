@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HackerTube fixture</title>
+<a class="vcard" id="card" href="/watch/dQw4w9WgXcQ">card <button id="later" data-later="dQw4w9WgXcQ">later</button></a>
+<a id="bad" href="/watch/short">bad id</a>
+<a id="browse" href="/browse">browse</a>
+<a id="external" href="https://news.ycombinator.com/item?id=1" target="_blank" rel="noopener">external</a>
+<a id="youtube" href="https://www.youtube.com/watch?v=9bZkp7q19f0" target="_blank" rel="noopener">youtube</a>
+<script>
+// The two click handlers of hackertube.org's page as of 2026-11-14: a capture-phase handler for
+// the Watch later button inside a card, and a document-level handler that follows same-site links
+// with history.pushState unless the event's default was prevented.
+window.routed = [];
+window.later = 0;
+document.addEventListener("click", (e) => {
+  const b = e.target instanceof Element && e.target.closest("[data-later]");
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  window.later++;
+}, true);
+document.addEventListener("click", (e) => {
+  const a = e.target instanceof Element && e.target.closest("a[href^='/']");
+  if (!a || a.target || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  history.pushState(null, "", a.getAttribute("href"));
+  window.routed.push(a.getAttribute("href"));
+});
+</script>
