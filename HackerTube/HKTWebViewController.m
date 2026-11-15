@@ -134,9 +134,10 @@ static NSString *const WatchLinkScript =
         decisionHandler(WKNavigationActionPolicyAllow);
         return;
     }
-    // Only a link activation opens the player or leaves the app; a redirect, a refresh or a script
-    // navigation does neither. WebKit also reports a click() that the page's own script makes on a
-    // link as an activation, so this is not proof of a touch.
+    // Only a navigation that WebKit reports as a link activation opens the player or leaves the app:
+    // the activated link itself, or a server redirect that answers it. A refresh, a script
+    // navigation, and a redirect of either open nothing. WebKit also reports a click() that the
+    // page's own script makes on a link as an activation, so this is not proof of a touch.
     BOOL activated = action.navigationType == WKNavigationTypeLinkActivated;
     NSString *videoID;
     switch (HKTRouteForURL(action.request.URL, _homeURL, &videoID)) {

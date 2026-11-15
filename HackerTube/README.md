@@ -21,9 +21,11 @@ Settings list.
   site, or to `youtube.com/watch?v=<video id>`, opens the native player; the id must be 11
   characters of `A-Z a-z 0-9 _ -`. An activated link to another site opens outside the app. Other
   links on the site stay in the web view, and nothing takes the web view itself off the site.
-  Redirects, refreshes and script navigations open nothing. The web view reports an activation
-  for a tap and also for a `click()` that the page's own script makes on a link, so the library
-  cannot require a touch.
+  Only a navigation that WebKit reports as a link activation opens the player or leaves the app:
+  the activated link itself, or a server redirect that answers it. A refresh, a script
+  navigation, and a redirect of either open nothing. WebKit reports an activation for a tap and
+  also for a `click()` that the page's own script makes on a link, so the library cannot require
+  a touch.
 - **The site follows same-site links from a click listener on the document.** The library
   registers its own listener first and keeps watch links away from the site's, so the tap becomes
   a navigation that the library hands to the player. If the site starts handling card taps in a
