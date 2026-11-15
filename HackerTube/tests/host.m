@@ -506,7 +506,10 @@ static void RunSwitchOn(UIWindow *window) {
     BOOL (^namesStatus)(UIView *) = ^BOOL(UIView *label) {
         return [label isKindOfClass:UILabel.class] && [((UILabel *)label).text containsString:@"503"];
     };
-    Check(Wait(20, ^BOOL { return !failure.hidden && Find(failure, namesStatus); }) && WebView(offline).hidden,
+    Wait(20, ^BOOL { return !failure.hidden; });
+    // WebKit reports the cancelled load once more as an error of its own; the status stays the reason.
+    Settle(0.5);
+    Check(!failure.hidden && Find(failure, namesStatus) && WebView(offline).hidden,
           @"an HTTP error status shows the failure message with that status instead of the server's error page");
     [retry sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
     Check(Wait(20, ^BOOL { return failure.hidden && [Script(WebView(offline), @"Array.isArray(window.routed)") boolValue]; })

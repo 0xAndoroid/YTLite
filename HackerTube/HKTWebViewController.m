@@ -108,6 +108,7 @@ static NSString *const WatchLinkScript =
 }
 
 - (void)showFailure:(NSString *)reason {
+    // What WebKit reports about this load from here on must not replace the reason.
     _homeLoad = nil;
     _reason.text = reason;
     _webView.hidden = YES;
