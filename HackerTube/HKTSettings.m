@@ -1,12 +1,9 @@
 #import "HackerTube.h"
 
 // Shapes of the YouTube Settings members used here, read from the 21.44.4 executable; the same
-// section mechanism the open-source YouPiP and YTVideoOverlay tweaks use. HKTInstallSettings
-// compares each with the running app before anything is hooked or called.
-@protocol HKTSettingsPresentationData
-+ (NSArray<NSNumber *> *)settingsCategoryOrder;
-@end
-
+// section mechanism the open-source YouPiP and YTVideoOverlay tweaks use. That version builds
+// Settings only from groups, so the flat category order those tweaks also extend is left alone.
+// HKTInstallSettings compares each member with the running app before anything is hooked or called.
 @protocol HKTSettingsGroupData
 - (NSArray<NSNumber *> *)orderedCategories;
 - (NSUInteger)type;
@@ -30,21 +27,12 @@
 + (NSMutableArray<NSNumber *> *)tweaks;
 @end
 
-// 'hktb'. YouTube's own categories are below 0x25; each tweak picks a constant of its own.
+// 'hktb'. YouTube's own categories are 1 through 0x25; each tweak picks a constant of its own.
 static const NSUInteger Section = 0x686B7462;
 // The group of YouTube's own categories that tweaks join when YouGroupSettings is absent.
 static const NSUInteger AccountGroup = 1;
 
-static IMP OriginalOrder, OriginalCategories, OriginalUpdate;
-
-static NSArray<NSNumber *> *Order(id self, SEL _cmd) {
-    NSArray<NSNumber *> *order = ((NSArray *(*)(id, SEL))OriginalOrder)(self, _cmd);
-    if (![order isKindOfClass:NSArray.class]) return order;
-    NSUInteger anchor = [order indexOfObject:@1];
-    NSMutableArray<NSNumber *> *result = [order mutableCopy];
-    [result insertObject:@(Section) atIndex:anchor == NSNotFound ? order.count : anchor + 1];
-    return result;
-}
+static IMP OriginalCategories, OriginalUpdate;
 
 static NSArray<NSNumber *> *Categories(id self, SEL _cmd) {
     Class groups = [self class];
@@ -83,11 +71,9 @@ static void Update(id self, SEL _cmd, NSUInteger category, id entry) {
 }
 
 BOOL HKTInstallSettings(void) {
-    Class presentation = NSClassFromString(@"YTAppSettingsPresentationData");
     Class groups = NSClassFromString(@"YTSettingsGroupData");
     Class manager = NSClassFromString(@"YTSettingsSectionItemManager");
-    SEL order = @selector(settingsCategoryOrder), categories = @selector(orderedCategories);
-    SEL update = @selector(updateSectionForCategory:withEntry:);
+    SEL categories = @selector(orderedCategories), update = @selector(updateSectionForCategory:withEntry:);
     SEL setItems = @selector(setSectionItems:forCategory:title:icon:titleDescription:headerHidden:);
 
     Ivar delegate = class_getInstanceVariable(manager, "_dataDelegate");
@@ -98,11 +84,9 @@ BOOL HKTInstallSettings(void) {
         || !HKTMethod(NSClassFromString(@"YTSettingsSectionItem"), @protocol(HKTSettingsSectionItem),
                       @selector(switchItemWithTitle:titleDescription:accessibilityIdentifier:switchOn:switchBlock:settingItemId:), NO)
         || !HKTMethod(groups, @protocol(HKTSettingsGroupData), @selector(type), YES)
-        || !HKTMethod(presentation, @protocol(HKTSettingsPresentationData), order, NO)
         || !HKTMethod(groups, @protocol(HKTSettingsGroupData), categories, YES)
         || !HKTMethod(manager, @protocol(HKTSettingsSectionItemManager), update, YES)) return NO;
 
-    HKTReplace(presentation, @protocol(HKTSettingsPresentationData), order, NO, (IMP)Order, &OriginalOrder);
     HKTReplace(groups, @protocol(HKTSettingsGroupData), categories, YES, (IMP)Categories, &OriginalCategories);
     HKTReplace(manager, @protocol(HKTSettingsSectionItemManager), update, YES, (IMP)Update, &OriginalUpdate);
     return YES;

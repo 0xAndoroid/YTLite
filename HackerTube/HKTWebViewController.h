@@ -1,8 +1,8 @@
 #import <UIKit/UIKit.h>
 
-/// Shows the site at one URL and keeps the web view on that site. Watch links go to `openVideo`,
-/// tapped links to other sites go to `openExternal`, and a failed load is replaced by a message
-/// with a Retry button.
+/// Shows the site at one URL and keeps the web view on that site. An activated watch link goes to
+/// `openVideo`, an activated link to another site goes to `openExternal`, and a load that fails or
+/// is answered with an HTTP error status is replaced by a message with a Retry button.
 @interface HKTWebViewController : UIViewController
 
 - (instancetype)initWithHomeURL:(NSURL *)homeURL

@@ -11,6 +11,7 @@
 #import <arpa/inet.h>
 #import <sys/socket.h>
 #import "HackerTube.h"
+#import "HKTRoute.h"
 #import "HKTWebViewController.h"
 
 static NSString *const HomeID = @"FEwhat_to_watch";
@@ -77,14 +78,6 @@ static NSMutableArray<YTAccountScopedCommandResponderEvent *> *SentEvents;
 }
 - (void)send {
     [SentEvents addObject:self];
-}
-@end
-
-@interface YTAppSettingsPresentationData : NSObject
-@end
-@implementation YTAppSettingsPresentationData
-+ (NSArray<NSNumber *> *)settingsCategoryOrder {
-    return @[@0, @1, @2];
 }
 @end
 
@@ -254,13 +247,15 @@ static uint16_t FreePort(void) {
     return ntohs(address.sin_port);
 }
 
-// Answers every GET on 127.0.0.1:port with `page`, as the site answers every path with its one page.
-static BOOL Serve(uint16_t port, NSData *page) {
+// Answers every GET on 127.0.0.1:port with `page`, as the site answers every path with its one
+// page. With `unavailableFirst` the first request gets status 503 and an error page instead.
+static BOOL Serve(uint16_t port, NSData *page, BOOL unavailableFirst) {
     int listener = socket(AF_INET, SOCK_STREAM, 0);
     int yes = 1;
     setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     struct sockaddr_in address = {.sin_len = sizeof(address), .sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
     if (bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(listener, 16) != 0) return NO;
+    __block BOOL unavailable = unavailableFirst;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         for (;;) {
             int client = accept(listener, NULL, NULL);
@@ -269,10 +264,13 @@ static BOOL Serve(uint16_t port, NSData *page) {
             setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
             char request[8192];
             read(client, request, sizeof(request));
-            NSString *head = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-                               "Content-Length: %lu\r\nConnection: close\r\n\r\n", (unsigned long)page.length];
+            NSData *body = unavailable ? [@"<h1>503 Service Unavailable</h1>" dataUsingEncoding:NSUTF8StringEncoding] : page;
+            NSString *head = [NSString stringWithFormat:@"HTTP/1.1 %s\r\nContent-Type: text/html; charset=utf-8\r\n"
+                               "Content-Length: %lu\r\nConnection: close\r\n\r\n",
+                               unavailable ? "503 Service Unavailable" : "200 OK", (unsigned long)body.length];
+            unavailable = NO;
             write(client, head.UTF8String, strlen(head.UTF8String));
-            write(client, page.bytes, page.length);
+            write(client, body.bytes, body.length);
             close(client);
         }
     });
@@ -283,9 +281,6 @@ static BOOL Serve(uint16_t port, NSData *page) {
 
 static void CheckSettings(void) {
     NSNumber *section = @(Section);
-    Check([[YTAppSettingsPresentationData settingsCategoryOrder] isEqual:@[@0, @1, section, @2]],
-          @"Settings order lists the HackerTube section after category 1");
-
     YTSettingsGroupData *account = [[YTSettingsGroupData alloc] initWithType:1 categories:@[@1, @5]];
     YTSettingsGroupData *playback = [[YTSettingsGroupData alloc] initWithType:2 categories:@[@7]];
     Check([account.orderedCategories isEqual:@[section, @1, @5]] && [playback.orderedCategories isEqual:@[@7]],
@@ -314,6 +309,62 @@ static void CheckSettings(void) {
           @"the switch saves the mode for the next launch");
 }
 
+// A class that has one method as the shape declares it, one with another return type, and lacks the third.
+@protocol MemberShape
+- (void)present;
+- (NSInteger)retyped;
+- (void)absent;
+@end
+
+@interface MemberProbe : NSObject
+@end
+@implementation MemberProbe
+- (void)present {
+}
+- (void)retyped {
+}
+@end
+
+static void NeverInstalled(id self, SEL _cmd) {
+}
+
+static void CheckMembers(void) {
+    Protocol *shape = @protocol(MemberShape);
+    IMP before = class_getMethodImplementation(MemberProbe.class, @selector(retyped)), original = NULL;
+    HKTReplace(MemberProbe.class, shape, @selector(retyped), YES, (IMP)NeverInstalled, &original);
+    HKTReplace(MemberProbe.class, shape, @selector(absent), YES, (IMP)NeverInstalled, &original);
+    Check(HKTMethod(MemberProbe.class, shape, @selector(present), YES) != NULL
+          && HKTMethod(MemberProbe.class, shape, @selector(retyped), YES) == NULL
+          && HKTMethod(MemberProbe.class, shape, @selector(absent), YES) == NULL
+          && original == NULL && class_getMethodImplementation(MemberProbe.class, @selector(retyped)) == before
+          && ![MemberProbe instancesRespondToSelector:@selector(absent)],
+          @"a member that is missing or has another type encoding is neither found nor replaced");
+}
+
+static void CheckRoutes(void) {
+    NSURL *home = [NSURL URLWithString:@"https://hackertube.org/"];
+    NSDictionary<NSString *, NSNumber *> *expected = @{
+        @"https://hackertube.org/browse?dur=xlong": @(HKTRouteInSite),
+        @"https://hackertube.org/watchlist": @(HKTRouteInSite),
+        @"https://hackertube.org/watch/dQw4w9WgXcQ": @(HKTRouteVideo),
+        @"https://m.youtube.com/watch?t=5&v=dQw4w9WgXcQ": @(HKTRouteVideo),
+        @"https://hackertube.org/watch/dQw4w9WgXcQ/extra": @(HKTRouteBlocked),
+        @"https://www.youtube.com/watch?v=short": @(HKTRouteBlocked),
+        @"youtube://watch?v=dQw4w9WgXcQ": @(HKTRouteBlocked),
+        @"http://hackertube.org/": @(HKTRouteExternal),
+        @"https://hackertube.org:8443/": @(HKTRouteExternal),
+        @"https://hackertube.org.evil.com/watch/dQw4w9WgXcQ": @(HKTRouteExternal),
+        @"https://hackertube.org@evil.com/watch/dQw4w9WgXcQ": @(HKTRouteExternal),
+        @"https://youtu.be/dQw4w9WgXcQ": @(HKTRouteExternal),
+    };
+    NSMutableArray<NSString *> *wrong = [NSMutableArray new];
+    for (NSString *link in expected) {
+        if (HKTRouteForURL([NSURL URLWithString:link], home, NULL) != expected[link].integerValue) [wrong addObject:link];
+    }
+    Check(wrong.count == 0, [@"links are routed by exact origin, path and video id" stringByAppendingString:
+        wrong.count ? [@"; wrong for " stringByAppendingString:[wrong componentsJoinedByString:@" "]] : @""]);
+}
+
 static void RunSwitchOff(UIWindow *window) {
     YTBrowseViewController *home = Browse(HomeID);
     window.rootViewController = [[ComboController alloc] initWithContent:home barHeight:120];
@@ -324,6 +375,8 @@ static void RunSwitchOff(UIWindow *window) {
           && class_getMethodImplementation(YTBrowseViewController.class, request)
              == class_getMethodImplementation(YTBaseInnerTubeViewController.class, request),
           @"with the switch off Home requests its own feed, gets no web view and has no request override");
+    CheckMembers();
+    CheckRoutes();
     CheckSettings();
 }
 
@@ -338,11 +391,8 @@ static void RunSwitchOn(UIWindow *window) {
           && CGRectEqualToRect(web.view.frame, home.view.bounds),
           @"Home shows the web view as its front-most, full-size child");
 
-    UIView *native = [UIView new];
-    [home.view addSubview:native];
     Request(home);
-    Check(home.requests == 0 && home.childViewControllers.count == 1 && home.view.subviews.lastObject == web.view,
-          @"Home makes no native feed request and keeps the web view in front of a re-added native view");
+    Check(home.requests == 0 && home.childViewControllers.count == 1, @"Home makes no native feed request");
 
     YTBrowseViewController *subscriptions = Browse(@"FEsubscriptions");
     [subscriptions beginAppearanceTransition:YES animated:NO];
@@ -397,6 +447,10 @@ static void RunSwitchOn(UIWindow *window) {
     Settle(1);
     Check(externals.count == 1 && [view.URL.host isEqual:@"127.0.0.1"], @"a script cannot take the web view to another site or open one");
 
+    Script(view, @"location.href = '/watch/dQw4w9WgXcQ'");
+    Settle(1);
+    Check(SentEvents.count == 1 && [Script(view, route) isEqual:@"/|"], @"a script navigation to a watch link plays nothing and goes nowhere");
+
     Script(view, @"document.getElementById('youtube').click()");
     Wait(5, ^BOOL { return SentEvents.count > 1; });
     Settle(0.5);
@@ -446,8 +500,15 @@ static void RunSwitchOn(UIWindow *window) {
     Check(Wait(20, ^BOOL { return !failure.hidden; }) && WebView(offline).hidden,
           @"an unreachable site shows the failure message instead of the page");
     NSData *page = [NSData dataWithContentsOfURL:[NSBundle.mainBundle URLForResource:@"fixture" withExtension:@"html"]];
-    Check(Serve(port, page), @"the site becomes reachable");
-    [(UIButton *)Identified(offline, @"hackertube.retry") sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
+    Check(Serve(port, page, YES), @"the site becomes reachable");
+    UIButton *retry = (UIButton *)Identified(offline, @"hackertube.retry");
+    [retry sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
+    BOOL (^namesStatus)(UIView *) = ^BOOL(UIView *label) {
+        return [label isKindOfClass:UILabel.class] && [((UILabel *)label).text containsString:@"503"];
+    };
+    Check(Wait(20, ^BOOL { return !failure.hidden && Find(failure, namesStatus); }) && WebView(offline).hidden,
+          @"an HTTP error status shows the failure message with that status instead of the server's error page");
+    [retry sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
     Check(Wait(20, ^BOOL { return failure.hidden && [Script(WebView(offline), @"Array.isArray(window.routed)") boolValue]; })
           && !WebView(offline).hidden, @"Retry loads the page and removes the failure message");
     CheckSettings();
@@ -485,7 +546,7 @@ int main(int argc, char *argv[]) {
 #ifdef HKT_SITE_URL
         NSURL *site = [NSURL URLWithString:@HKT_SITE_URL];
         NSData *page = [NSData dataWithContentsOfURL:[NSBundle.mainBundle URLForResource:@"fixture" withExtension:@"html"]];
-        if (!page || !Serve(site.port.unsignedShortValue, page)) {
+        if (!page || !Serve(site.port.unsignedShortValue, page, NO)) {
             puts("FAIL fixture server could not start");
             return 1;
         }

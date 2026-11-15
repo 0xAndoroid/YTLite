@@ -22,6 +22,7 @@ static NSString *const WatchLinkScript =
     void (^_openVideo)(NSString *videoID);
     void (^_openExternal)(NSURL *url);
     WKWebView *_webView;
+    WKNavigation *_homeLoad;
     UIStackView *_failure;
     UILabel *_reason;
 }
@@ -103,15 +104,24 @@ static NSString *const WatchLinkScript =
 - (void)loadHome {
     _failure.hidden = YES;
     _webView.hidden = NO;
-    [_webView loadRequest:[NSURLRequest requestWithURL:_homeURL]];
+    _homeLoad = [_webView loadRequest:[NSURLRequest requestWithURL:_homeURL]];
 }
 
-- (void)failWithError:(NSError *)error {
-    // A load that a newer one replaced is not a failure.
-    if ([error.domain isEqual:NSURLErrorDomain] && error.code == NSURLErrorCancelled) return;
-    _reason.text = error.localizedDescription;
+- (void)showFailure:(NSString *)reason {
+    _homeLoad = nil;
+    _reason.text = reason;
     _webView.hidden = YES;
     _failure.hidden = NO;
+}
+
+- (void)navigation:(WKNavigation *)navigation failedWithError:(NSError *)error {
+    // Only the current home load can fail the page. WebKit reports a load that was cancelled here
+    // once more as an error, which can arrive after Retry has started the next load, and a link
+    // whose navigation fails leaves the page it was on.
+    if (navigation != _homeLoad) return;
+    // A load that a newer navigation replaced is not a failure.
+    if ([error.domain isEqual:NSURLErrorDomain] && error.code == NSURLErrorCancelled) return;
+    [self showFailure:error.localizedDescription];
 }
 
 #pragma mark WKNavigationDelegate
@@ -123,6 +133,10 @@ static NSString *const WatchLinkScript =
         decisionHandler(WKNavigationActionPolicyAllow);
         return;
     }
+    // Only a link activation opens the player or leaves the app; a redirect, a refresh or a script
+    // navigation does neither. WebKit also reports a click() that the page's own script makes on a
+    // link as an activation, so this is not proof of a touch.
+    BOOL activated = action.navigationType == WKNavigationTypeLinkActivated;
     NSString *videoID;
     switch (HKTRouteForURL(action.request.URL, _homeURL, &videoID)) {
         case HKTRouteInSite:
@@ -130,11 +144,10 @@ static NSString *const WatchLinkScript =
             decisionHandler(newWindow ? WKNavigationActionPolicyCancel : WKNavigationActionPolicyAllow);
             return;
         case HKTRouteVideo:
-            _openVideo(videoID);
+            if (activated) _openVideo(videoID);
             break;
         case HKTRouteExternal:
-            // Only a tapped link leaves the app; a redirect or script cannot send the user elsewhere.
-            if (action.navigationType == WKNavigationTypeLinkActivated) _openExternal(action.request.URL);
+            if (activated) _openExternal(action.request.URL);
             break;
         case HKTRouteBlocked:
             break;
@@ -142,12 +155,25 @@ static NSString *const WatchLinkScript =
     decisionHandler(WKNavigationActionPolicyCancel);
 }
 
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationResponse:(WKNavigationResponse *)navigationResponse
+    decisionHandler:(void (^)(WKNavigationResponsePolicy))decisionHandler {
+    NSHTTPURLResponse *response = (NSHTTPURLResponse *)navigationResponse.response;
+    if (navigationResponse.isForMainFrame && [response isKindOfClass:NSHTTPURLResponse.class] && response.statusCode >= 400) {
+        // WebKit would otherwise show the server's error page as a page that loaded.
+        [self showFailure:[NSString stringWithFormat:@"The site answered with HTTP status %ld (%@).",
+            (long)response.statusCode, [NSHTTPURLResponse localizedStringForStatusCode:response.statusCode]]];
+        decisionHandler(WKNavigationResponsePolicyCancel);
+        return;
+    }
+    decisionHandler(WKNavigationResponsePolicyAllow);
+}
+
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
-    [self failWithError:error];
+    [self navigation:navigation failedWithError:error];
 }
 
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
-    [self failWithError:error];
+    [self navigation:navigation failedWithError:error];
 }
 
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {

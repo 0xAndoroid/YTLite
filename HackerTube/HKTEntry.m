@@ -20,6 +20,6 @@ void HKTReplace(Class cls, Protocol *shape, SEL selector, BOOL isInstanceMethod,
 }
 
 __attribute__((constructor)) static void Start(void) {
-    // Home is replaced only while the switch that turns it off again is reachable.
+    // Home is replaced only if the Settings hooks that carry its switch were installed.
     if (HKTInstallSettings() && [NSUserDefaults.standardUserDefaults boolForKey:HKTHomeEnabledKey]) HKTInstallHome();
 }

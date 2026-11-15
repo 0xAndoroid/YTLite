@@ -15,11 +15,15 @@ Settings list.
 ## Dependencies
 
 - **hackertube.org is reachable.** The library keeps no offline copy of the page. When the page
-  cannot load, Home shows a message with a Retry button.
-- **The site's cards stay links to a video.** A link to `/watch/<video id>` on the site, or to
-  `youtube.com/watch?v=<video id>`, opens the native player; the id must be 11 characters of
-  `A-Z a-z 0-9 _ -`. Other links on the site stay in the web view, tapped links to other sites
-  open outside the app, and nothing else can take the web view off the site.
+  cannot load, or the site answers with an HTTP error status, Home shows a message with a Retry
+  button.
+- **The site's cards stay links to a video.** An activated link to `/watch/<video id>` on the
+  site, or to `youtube.com/watch?v=<video id>`, opens the native player; the id must be 11
+  characters of `A-Z a-z 0-9 _ -`. An activated link to another site opens outside the app. Other
+  links on the site stay in the web view, and nothing takes the web view itself off the site.
+  Redirects, refreshes and script navigations open nothing. The web view reports an activation
+  for a tap and also for a `click()` that the page's own script makes on a link, so the library
+  cannot require a touch.
 - **The site follows same-site links from a click listener on the document.** The library
   registers its own listener first and keeps watch links away from the site's, so the tap becomes
   a navigation that the library hands to the player. If the site starts handling card taps in a
@@ -37,6 +41,13 @@ Settings list.
   its History or count it as seen, and the like and dislike buttons on that page are out of reach.
 - "Play all on YouTube" and other youtube.com links that are not a single video open outside the
   app.
+- The page reloads only when YouTube restarts, when iOS ends the web view's process, when YouTube
+  rebuilds its Home page (the tab bar can drop its cached pages, for example on an account
+  change), or through Retry. Tapping the Home tab again does not refresh it.
+- With no network at launch, Home shows the failure message. YouTube's own jump to the Library
+  tab for an offline start does not happen.
+- With a hardware keyboard, the site's shortcut that opens the selected card shows the site's own
+  watch page with its embedded player.
 
 ## Build and checks
 
@@ -50,4 +61,4 @@ The library builds for arm64 iOS 17 with install name `@rpath/HackerTube.dylib`.
 the library's sources in a throwaway simulator, where stand-in classes with YouTube's names
 record what the app would be asked to do; they cover the web view, link routing, the failure
 message and the hook logic. YouTube itself cannot run in a simulator, so the replaced Home tab and
-playback are only proven on a phone.
+playback can only be checked on a phone. That check has not been run yet.

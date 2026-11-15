@@ -59,27 +59,22 @@ static CGFloat CoveredTop(UIViewController *host, UIView *view) {
 }
 
 static void Attach(UIViewController *host) {
-    if (!host.isViewLoaded) return;
-    HKTWebViewController *web = objc_getAssociatedObject(host, WebKey);
-    if (!web) {
-        __weak UIViewController *weakHost = host;
-        web = [[HKTWebViewController alloc] initWithHomeURL:[NSURL URLWithString:@HKT_SITE_URL]
-            openVideo:^(NSString *videoID) { OpenVideo(weakHost, videoID); }
-            openExternal:^(NSURL *url) { [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil]; }];
-        web.coveredTop = ^CGFloat(UIView *view) { return CoveredTop(weakHost, view); };
-        objc_setAssociatedObject(host, WebKey, web, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [host addChildViewController:web];
-        web.view.frame = host.view.bounds;
-        web.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        [host.view addSubview:web.view];
-        [web didMoveToParentViewController:host];
-    }
-    // The app re-adds its own response view on top whenever it prepares a request (-[YTWrapperView setChildView:]).
-    [host.view bringSubviewToFront:web.view];
+    if (!host.isViewLoaded || objc_getAssociatedObject(host, WebKey)) return;
+    __weak UIViewController *weakHost = host;
+    HKTWebViewController *web = [[HKTWebViewController alloc] initWithHomeURL:[NSURL URLWithString:@HKT_SITE_URL]
+        openVideo:^(NSString *videoID) { OpenVideo(weakHost, videoID); }
+        openExternal:^(NSURL *url) { [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil]; }];
+    web.coveredTop = ^CGFloat(UIView *view) { return CoveredTop(weakHost, view); };
+    objc_setAssociatedObject(host, WebKey, web, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [host addChildViewController:web];
+    web.view.frame = host.view.bounds;
+    web.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [host.view addSubview:web.view];
+    [web didMoveToParentViewController:host];
 }
 
 // Every request a browse page makes (first load, refresh, retry) goes through this method, and the
-// responses it delivers are the only source of the native feed, so Home never loads one.
+// responses it delivers are the page's only source of a feed, so the Home page never receives one.
 static void Request(id self, SEL _cmd, BOOL refresh, BOOL disablePrepare, BOOL nonContinuation) {
     if (IsHome(self)) {
         Attach(self);
@@ -88,6 +83,7 @@ static void Request(id self, SEL _cmd, BOOL refresh, BOOL disablePrepare, BOOL n
     ((void (*)(id, SEL, BOOL, BOOL, BOOL))OriginalRequest)(self, _cmd, refresh, disablePrepare, nonContinuation);
 }
 
+// The first request can arrive before the view exists; this attaches the web view once it does.
 static void Appear(id self, SEL _cmd, BOOL animated) {
     ((void (*)(id, SEL, BOOL))OriginalAppear)(self, _cmd, animated);
     if (IsHome(self)) Attach(self);
