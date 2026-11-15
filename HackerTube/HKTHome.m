@@ -36,8 +36,9 @@ static BOOL IsHome(id controller) {
     return [identifier isKindOfClass:NSString.class] && [identifier isEqualToString:HomeBrowseID];
 }
 
-// The app's own play buttons send this event from their view controller, with these arguments
-// (-[YTPlaylistHeaderViewController didTapPlayAll:]); the app's navigation handler plays a watch endpoint.
+// How the app's own controls open a video: -[YTPlaylistHeaderViewController didTapPlayAll:] sends
+// this event from its view with itself as first responder, and the app's navigation handler plays
+// a watch endpoint.
 static void OpenVideo(UIViewController *host, NSString *videoID) {
     if (!host) return;
     Class<HKTCommand> commands = NSClassFromString(@"YTICommand");

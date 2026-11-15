@@ -407,21 +407,6 @@ static void RunSwitchOn(UIWindow *window) {
     Check([Script(view, route) isEqual:@"/browse|/browse"] && SentEvents.count == 2 && externals.count == 1,
           @"a same-site link stays in the web view under the site's own routing");
     Check(Identified(web, @"hackertube.failure").hidden && !view.hidden, @"none of the cancelled links shows the failure message");
-
-    uint16_t port = FreePort();
-    NSURL *unreachable = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%d/", port]];
-    HKTWebViewController *offline = [[HKTWebViewController alloc] initWithHomeURL:unreachable
-        openVideo:^(NSString *videoID) {} openExternal:^(NSURL *url) {}];
-    window.rootViewController = offline;
-    UIView *failure = Identified(offline, @"hackertube.failure");
-    Check(failure.hidden, @"no failure message while the first load is in progress");
-    Check(Wait(20, ^BOOL { return !failure.hidden; }) && WebView(offline).hidden,
-          @"an unreachable site shows the failure message instead of the page");
-    NSData *page = [NSData dataWithContentsOfURL:[NSBundle.mainBundle URLForResource:@"fixture" withExtension:@"html"]];
-    Check(Serve(port, page), @"the site becomes reachable");
-    [(UIButton *)Identified(offline, @"hackertube.retry") sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
-    Check(Wait(20, ^BOOL { return failure.hidden && [Script(WebView(offline), @"Array.isArray(window.routed)") boolValue]; })
-          && !WebView(offline).hidden, @"Retry loads the page and removes the failure message");
 #else
     NSString *card = @"document.querySelector(\"a.vcard[href^='/watch/']\")";
     Check(Wait(40, ^BOOL { return [Script(view, [card stringByAppendingString:@" !== null"]) boolValue]; }),
@@ -450,6 +435,21 @@ static void RunSwitchOn(UIWindow *window) {
     Check(Identified(web, @"hackertube.failure").hidden && !view.hidden, @"live: no failure message");
     printf("live: first card video id %s\n", videoID.UTF8String);
 #endif
+
+    uint16_t port = FreePort();
+    NSURL *unreachable = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%d/", port]];
+    HKTWebViewController *offline = [[HKTWebViewController alloc] initWithHomeURL:unreachable
+        openVideo:^(NSString *videoID) {} openExternal:^(NSURL *url) {}];
+    window.rootViewController = offline;
+    UIView *failure = Identified(offline, @"hackertube.failure");
+    Check(failure.hidden, @"no failure message while the first load is in progress");
+    Check(Wait(20, ^BOOL { return !failure.hidden; }) && WebView(offline).hidden,
+          @"an unreachable site shows the failure message instead of the page");
+    NSData *page = [NSData dataWithContentsOfURL:[NSBundle.mainBundle URLForResource:@"fixture" withExtension:@"html"]];
+    Check(Serve(port, page), @"the site becomes reachable");
+    [(UIButton *)Identified(offline, @"hackertube.retry") sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
+    Check(Wait(20, ^BOOL { return failure.hidden && [Script(WebView(offline), @"Array.isArray(window.routed)") boolValue]; })
+          && !WebView(offline).hidden, @"Retry loads the page and removes the failure message");
     CheckSettings();
 }
 
