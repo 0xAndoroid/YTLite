@@ -1,0 +1,28 @@
+name: HackerTube
+
+on:
+  pull_request:
+    paths:
+      - 'HackerTube/**'
+      - '.github/workflows/hackertube.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Simulator checks
+        run: python3 HackerTube/tests/run.py "$RUNNER_TEMP/hackertube"
+      - name: Build the companion
+        run: make -C HackerTube BUILD="$RUNNER_TEMP/hackertube"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hackertube
+          path: |
+            ${{ runner.temp }}/hackertube/HackerTube.dylib
+            ${{ runner.temp }}/hackertube/checks.log
+          if-no-files-found: ignore
