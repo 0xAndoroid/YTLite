@@ -155,6 +155,20 @@ static NSMutableArray<YTAccountScopedCommandResponderEvent *> *SentEvents;
 @implementation PlaybackOwner
 @end
 
+@interface YTLocalPlaybackController : PlaybackOwner
+@property (nonatomic) BOOL nativeAllowsBackground;
+@property (nonatomic, getter=isActivePlayback) BOOL activePlayback;
+@property (nonatomic) BOOL lockScreenVisible;
+- (BOOL)isPlaybackBackgroundable;
+- (void)appDidEnterBackground;
+- (void)updateLockScreenController;
+@end
+@implementation YTLocalPlaybackController
+- (BOOL)isPlaybackBackgroundable { return self.nativeAllowsBackground; }
+- (void)appDidEnterBackground {}
+- (void)updateLockScreenController { self.lockScreenVisible = self.isPlaybackBackgroundable; }
+@end
+
 @interface YTPlayerPIPController : NSObject
 @property (nonatomic, weak) PlaybackOwner *delegate;
 @property (nonatomic) BOOL nativeAllowsPiP;
@@ -315,7 +329,8 @@ static void CheckSettings(void) {
 
     YTSettingsSectionItem *shorts = recorder.items.lastObject;
     YTPlayerPIPController *pip = [YTPlayerPIPController new];
-    PlaybackOwner *local = [PlaybackOwner new];
+    YTLocalPlaybackController *local = [YTLocalPlaybackController new];
+    local.nativeAllowsBackground = YES;
     local.parentResponder = [PlaybackOwner new];
     PlaybackOwner *traits = [PlaybackOwner new];
     local.parentResponder.playerViewControllerTraits = traits;
@@ -323,14 +338,28 @@ static void CheckSettings(void) {
     pip.nativeAllowsPiP = YES;
     traits.name = @"com.google.youtube.reel.watch";
     Check(!shorts.switchOn && !pip.canEnablePictureInPicture, @"Shorts PiP is off by default");
-    Check(shorts.switchBlock(nil, YES) && pip.canEnablePictureInPicture, @"the Shorts switch restores native PiP");
+    Check(!local.isPlaybackBackgroundable, @"a Short cannot keep background audio or lock screen controls");
+    Check(shorts.switchBlock(nil, YES) && pip.canEnablePictureInPicture && local.isPlaybackBackgroundable,
+          @"the same Shorts switch restores the native PiP and background playback decisions");
     pip.nativeAllowsPiP = NO;
-    Check(!pip.canEnablePictureInPicture, @"allowing Shorts PiP does not override a native denial");
+    local.nativeAllowsBackground = NO;
+    Check(!pip.canEnablePictureInPicture && !local.isPlaybackBackgroundable,
+          @"allowing background playback for Shorts does not override native denials");
     shorts.switchBlock(nil, NO);
+    local.nativeAllowsBackground = YES;
+    local.lockScreenVisible = YES;
+    [local appDidEnterBackground];
+    Check(local.lockScreenVisible, @"a cached Short does not clear the lock screen on backgrounding");
+    local.activePlayback = YES;
+    [local appDidEnterBackground];
+    Check(!local.lockScreenVisible, @"leaving a paused active Short clears previously published controls");
     traits.name = @"com.google.youtube.youtube.watch";
     Check(!pip.canEnablePictureInPicture, @"a regular player's native denial is preserved");
+    Check(local.isPlaybackBackgroundable, @"regular background audio is independent of a native PiP denial");
     pip.nativeAllowsPiP = YES;
-    Check(pip.canEnablePictureInPicture, @"a regular player remains eligible after a Short");
+    local.nativeAllowsBackground = NO;
+    Check(pip.canEnablePictureInPicture && !local.isPlaybackBackgroundable,
+          @"a regular player can have PiP without background audio after a Short");
 
     static NSMutableArray<NSNumber *> *tweaks;
     tweaks = [@[@200] mutableCopy];

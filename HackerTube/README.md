@@ -2,8 +2,9 @@
 
 A companion library for the sideloaded YouTube app. With its switch on, the Home tab shows
 [hackertube.org](https://hackertube.org/) in a web view in place of YouTube's feed, and a video
-tapped there plays in YouTube's own player. Separately, leaving a Short no longer starts Picture in
-Picture by default. Regular videos keep YouTube's existing PiP behavior.
+tapped there plays in YouTube's own player. By default, the Shorts player cannot continue playing in
+the background, start Picture in Picture, or publish lock screen controls. Regular videos keep their
+existing playback behavior.
 
 ## Settings
 
@@ -11,8 +12,9 @@ YouTube Settings has a HackerTube section. "HackerTube Home" is off by default. 
 switch is saved in the app's standard user defaults under `HackerTubeHomeEnabled` and read once at
 launch, so a change applies after YouTube restarts.
 
-"Allow Picture in Picture for Shorts" restores YouTube's PiP policy for the Shorts player when
-enabled. It works independently of HackerTube Home and does not require a restart.
+"Allow background playback for Shorts" restores the app's background audio, lock screen and PiP
+policies for Shorts. It uses the same saved preference as the previous Shorts PiP switch and works
+independently of HackerTube Home.
 
 ## Dependencies
 
