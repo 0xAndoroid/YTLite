@@ -2,15 +2,17 @@
 
 A companion library for the sideloaded YouTube app. With its switch on, the Home tab shows
 [hackertube.org](https://hackertube.org/) in a web view in place of YouTube's feed, and a video
-tapped there plays in YouTube's own player. The top bar, the other tabs, search and playback are
-untouched. The library depends on nothing else in this repository.
+tapped there plays in YouTube's own player. Separately, leaving a Short no longer starts Picture in
+Picture by default. Regular videos keep YouTube's existing PiP behavior.
 
-## Switch
+## Settings
 
-YouTube Settings has a HackerTube section with one switch, "HackerTube Home", off by default. The
+YouTube Settings has a HackerTube section. "HackerTube Home" is off by default. The
 switch is saved in the app's standard user defaults under `HackerTubeHomeEnabled` and read once at
-launch, so a change applies after YouTube restarts. While it is off the library hooks only the
-Settings list.
+launch, so a change applies after YouTube restarts.
+
+"Allow Picture in Picture for Shorts" restores YouTube's PiP policy for the Shorts player when
+enabled. It works independently of HackerTube Home and does not require a restart.
 
 ## Dependencies
 
@@ -34,7 +36,7 @@ Settings list.
 - **YouTube keeps the members listed in `HKTHome.m` and `HKTSettings.m`**, read from the 21.44.4
   executable: the browse page's request method and `FEwhat_to_watch` identifier, the command
   event that opens a watch endpoint, and the Settings section calls. Each is looked up by name and
-  compared by type encoding at launch. If a Settings member differs, nothing is hooked; if a Home
+  compared by type encoding at launch. If a Settings member differs, Home stays native; if a Home
   member differs, Home stays native and the switch says the mode is not available.
 
 ## Limits

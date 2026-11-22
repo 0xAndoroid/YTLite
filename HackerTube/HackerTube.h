@@ -3,6 +3,8 @@
 
 /// Standard user defaults key of the "HackerTube Home" switch. Read once per launch.
 extern NSString *const HKTHomeEnabledKey;
+extern NSString *const HKTAllowShortsPiPKey;
+void HKTInstallShortsPiP(void);
 
 /// The method `cls` responds to for `selector`, provided its type encoding is the one the
 /// protocol `shape` declares for that selector; NULL otherwise.

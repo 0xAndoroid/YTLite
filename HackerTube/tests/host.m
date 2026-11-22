@@ -147,6 +147,23 @@ static NSMutableArray<YTAccountScopedCommandResponderEvent *> *SentEvents;
 }
 @end
 
+@interface PlaybackOwner : NSObject
+@property (nonatomic, strong) PlaybackOwner *parentResponder;
+@property (nonatomic, strong) PlaybackOwner *playerViewControllerTraits;
+@property (nonatomic, copy) NSString *name;
+@end
+@implementation PlaybackOwner
+@end
+
+@interface YTPlayerPIPController : NSObject
+@property (nonatomic, weak) PlaybackOwner *delegate;
+@property (nonatomic) BOOL nativeAllowsPiP;
+- (BOOL)canEnablePictureInPicture;
+@end
+@implementation YTPlayerPIPController
+- (BOOL)canEnablePictureInPicture { return self.nativeAllowsPiP; }
+@end
+
 // Lays its content out under a top bar, as the app does with a frosted top bar.
 @interface ComboController : UIViewController
 @end
@@ -291,10 +308,29 @@ static void CheckSettings(void) {
     [manager updateSectionForCategory:3 withEntry:nil];
     [manager updateSectionForCategory:Section withEntry:nil];
     YTSettingsSectionItem *toggle = recorder.items.firstObject;
-    Check([manager.nativeUpdates isEqual:@[@3]] && recorder.items.count == 1 && recorder.category == Section
+    Check([manager.nativeUpdates isEqual:@[@3]] && recorder.items.count == 2 && recorder.category == Section
           && [recorder.title isEqual:@"HackerTube"] && [toggle.title isEqual:@"HackerTube Home"]
           && toggle.switchOn == SwitchOnAtLaunch && [toggle.titleDescription containsString:@"Restart YouTube"],
-          @"the section holds one switch that shows the saved mode and says a restart applies it");
+          @"the Home switch shows the saved mode and says a restart applies it");
+
+    YTSettingsSectionItem *shorts = recorder.items.lastObject;
+    YTPlayerPIPController *pip = [YTPlayerPIPController new];
+    PlaybackOwner *local = [PlaybackOwner new];
+    local.parentResponder = [PlaybackOwner new];
+    PlaybackOwner *traits = [PlaybackOwner new];
+    local.parentResponder.playerViewControllerTraits = traits;
+    pip.delegate = local;
+    pip.nativeAllowsPiP = YES;
+    traits.name = @"com.google.youtube.reel.watch";
+    Check(!shorts.switchOn && !pip.canEnablePictureInPicture, @"Shorts PiP is off by default");
+    Check(shorts.switchBlock(nil, YES) && pip.canEnablePictureInPicture, @"the Shorts switch restores native PiP");
+    pip.nativeAllowsPiP = NO;
+    Check(!pip.canEnablePictureInPicture, @"allowing Shorts PiP does not override a native denial");
+    shorts.switchBlock(nil, NO);
+    traits.name = @"com.google.youtube.youtube.watch";
+    Check(!pip.canEnablePictureInPicture, @"a regular player's native denial is preserved");
+    pip.nativeAllowsPiP = YES;
+    Check(pip.canEnablePictureInPicture, @"a regular player remains eligible after a Short");
 
     static NSMutableArray<NSNumber *> *tweaks;
     tweaks = [@[@200] mutableCopy];
