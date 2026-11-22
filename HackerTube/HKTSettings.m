@@ -66,7 +66,16 @@ static void Update(id self, SEL _cmd, NSUInteger category, id entry) {
             return YES;
         } settingItemId:0];
     if (!toggle) return;
-    [delegate setSectionItems:[NSMutableArray arrayWithObject:toggle] forCategory:Section title:@"HackerTube"
+    NSMutableArray *rows = [NSMutableArray arrayWithObject:toggle];
+    id shortsPiP = [items switchItemWithTitle:@"Allow Picture in Picture for Shorts"
+        titleDescription:@"Let Shorts keep playing in a floating window when you leave YouTube."
+        accessibilityIdentifier:@"hackertube.shorts-pip" switchOn:[defaults boolForKey:HKTAllowShortsPiPKey]
+        switchBlock:^BOOL(id cell, BOOL on) {
+            [defaults setBool:on forKey:HKTAllowShortsPiPKey];
+            return YES;
+        } settingItemId:0];
+    if (shortsPiP) [rows addObject:shortsPiP];
+    [delegate setSectionItems:rows forCategory:Section title:@"HackerTube"
         icon:nil titleDescription:nil headerHidden:NO];
 }
 

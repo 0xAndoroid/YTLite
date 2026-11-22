@@ -20,6 +20,7 @@ void HKTReplace(Class cls, Protocol *shape, SEL selector, BOOL isInstanceMethod,
 }
 
 __attribute__((constructor)) static void Start(void) {
+    HKTInstallShortsPiP();
     // Home is replaced only if the Settings hooks that carry its switch were installed.
     if (HKTInstallSettings() && [NSUserDefaults.standardUserDefaults boolForKey:HKTHomeEnabledKey]) HKTInstallHome();
 }
