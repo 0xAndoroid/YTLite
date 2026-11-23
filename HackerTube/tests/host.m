@@ -287,23 +287,32 @@ static BOOL Serve(uint16_t port, NSData *page, BOOL unavailableFirst) {
     setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     struct sockaddr_in address = {.sin_len = sizeof(address), .sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
     if (bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(listener, 16) != 0) return NO;
+    dispatch_queue_t connections = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
+    NSObject *responseLock = [NSObject new];
     __block BOOL unavailable = unavailableFirst;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_async(connections, ^{
         for (;;) {
             int client = accept(listener, NULL, NULL);
             if (client < 0) continue;
-            int on = 1;
-            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
-            char request[8192];
-            read(client, request, sizeof(request));
-            NSData *body = unavailable ? [@"<h1>503 Service Unavailable</h1>" dataUsingEncoding:NSUTF8StringEncoding] : page;
-            NSString *head = [NSString stringWithFormat:@"HTTP/1.1 %s\r\nContent-Type: text/html; charset=utf-8\r\n"
-                               "Content-Length: %lu\r\nConnection: close\r\n\r\n",
-                               unavailable ? "503 Service Unavailable" : "200 OK", (unsigned long)body.length];
-            unavailable = NO;
-            write(client, head.UTF8String, strlen(head.UTF8String));
-            write(client, body.bytes, body.length);
-            close(client);
+            dispatch_async(connections, ^{
+                int on = 1;
+                setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+                char request[8192];
+                if (read(client, request, sizeof(request)) > 0) {
+                    BOOL sendUnavailable;
+                    @synchronized (responseLock) {
+                        sendUnavailable = unavailable;
+                        unavailable = NO;
+                    }
+                    NSData *body = sendUnavailable ? [@"<h1>503 Service Unavailable</h1>" dataUsingEncoding:NSUTF8StringEncoding] : page;
+                    NSString *head = [NSString stringWithFormat:@"HTTP/1.1 %s\r\nContent-Type: text/html; charset=utf-8\r\n"
+                                       "Content-Length: %lu\r\nConnection: close\r\n\r\n",
+                                       sendUnavailable ? "503 Service Unavailable" : "200 OK", (unsigned long)body.length];
+                    write(client, head.UTF8String, strlen(head.UTF8String));
+                    write(client, body.bytes, body.length);
+                }
+                close(client);
+            });
         }
     });
     return YES;
