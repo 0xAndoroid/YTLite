@@ -16,6 +16,7 @@
 
 static NSString *const HomeID = @"FEwhat_to_watch";
 static const NSUInteger Section = 0x686B7462;
+static BOOL SmokeOnly;
 static BOOL SwitchOnAtLaunch;
 static NSUInteger Failures;
 
@@ -459,12 +460,14 @@ static void RunSwitchOn(UIWindow *window) {
     Request(home);
     Check(home.requests == 0 && home.childViewControllers.count == 1, @"Home makes no native feed request");
 
-    YTBrowseViewController *subscriptions = Browse(@"FEsubscriptions");
-    [subscriptions beginAppearanceTransition:YES animated:NO];
-    [subscriptions endAppearanceTransition];
-    Request(subscriptions);
-    Check(subscriptions.appearances == 1 && subscriptions.requests == 1 && subscriptions.childViewControllers.count == 0,
-          @"another browse page requests its feed and gets no web view");
+    if (!SmokeOnly) {
+        YTBrowseViewController *subscriptions = Browse(@"FEsubscriptions");
+        [subscriptions beginAppearanceTransition:YES animated:NO];
+        [subscriptions endAppearanceTransition];
+        Request(subscriptions);
+        Check(subscriptions.appearances == 1 && subscriptions.requests == 1 && subscriptions.childViewControllers.count == 0,
+              @"another browse page requests its feed and gets no web view");
+    }
 
     [window layoutIfNeeded];
     WKWebView *view = WebView(web);
@@ -492,6 +495,7 @@ static void RunSwitchOn(UIWindow *window) {
           && event(0).fromView == home.view && !event(0).sendClick && !event(0).entry,
           @"a card tap sends exactly one watch event for its video from the Home controller");
     Check([Script(view, route) isEqual:@"/|"], @"a card tap leaves the page where it was instead of on the watch page");
+    if (SmokeOnly) return;
 
     Script(view, @"document.getElementById('later').click()");
     Settle(0.5);
@@ -598,10 +602,13 @@ static void RunSwitchOn(UIWindow *window) {
     self.window.rootViewController = [UIViewController new];
     [self.window makeKeyAndVisible];
     [NSTimer scheduledTimerWithTimeInterval:0 repeats:NO block:^(NSTimer *timer) {
+        if (SmokeOnly) Check(SwitchOnAtLaunch, @"the smoke launch enables HackerTube Home");
         if (SwitchOnAtLaunch) RunSwitchOn(self.window);
-        else RunSwitchOff(self.window);
+        else if (!SmokeOnly) RunSwitchOff(self.window);
         [NSUserDefaults.standardUserDefaults synchronize];
-        printf("HackerTube checks with the switch %s: %s\n", SwitchOnAtLaunch ? "on" : "off", Failures ? "FAIL" : "PASS");
+        const char *result = Failures ? "FAIL" : "PASS";
+        if (SmokeOnly) printf("HackerTube smoke: %s\n", result);
+        else printf("HackerTube checks with the switch %s: %s\n", SwitchOnAtLaunch ? "on" : "off", result);
         fflush(stdout);
         exit(Failures ? 1 : 0);
     }];
@@ -610,6 +617,7 @@ static void RunSwitchOn(UIWindow *window) {
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
+        SmokeOnly = [NSProcessInfo.processInfo.arguments containsObject:@"--smoke"];
         SwitchOnAtLaunch = [NSUserDefaults.standardUserDefaults boolForKey:HKTHomeEnabledKey];
 #ifdef HKT_SITE_URL
         NSURL *site = [NSURL URLWithString:@HKT_SITE_URL];

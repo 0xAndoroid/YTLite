@@ -1,0 +1,31 @@
+name: HackerTube nightly
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - id: select
+        name: Check for a new commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 HackerTube/tests/select-nightly.py
+
+  full:
+    needs: preflight
+    if: needs.preflight.outputs.run != 'false'
+    uses: ./.github/workflows/hackertube.yml

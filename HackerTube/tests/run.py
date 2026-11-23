@@ -1,9 +1,10 @@
-"""Builds the simulator test host and runs it in a throwaway simulator, once with the
-HackerTube Home switch off and once with it on.
+"""Builds the test host and runs it in a throwaway simulator.
 
-    run.py BUILD_DIR          Home loads the test host's own fixture server
-    run.py BUILD_DIR --live   Home loads https://hackertube.org/; also saves live.png
+    run.py BUILD_DIR           Full suite with the test host's own fixture server
+    run.py BUILD_DIR --smoke   One launch covering Home and a card tap on the fixture
+    run.py BUILD_DIR --live    Home loads https://hackertube.org/; also saves live.png
 """
+import argparse
 import json
 import os
 import shutil
@@ -14,8 +15,13 @@ import threading
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-build = Path(sys.argv[1]).resolve()
-live = "--live" in sys.argv[2:]
+parser = argparse.ArgumentParser(description="Run the HackerTube simulator fixture.")
+parser.add_argument("build_dir", type=Path)
+mode = parser.add_mutually_exclusive_group()
+mode.add_argument("--smoke", action="store_true")
+mode.add_argument("--live", action="store_true")
+args = parser.parse_args()
+build = args.build_dir.resolve()
 bundle = "ee.andrew.hackertube-tests"
 
 
@@ -29,9 +35,8 @@ def free_port():
         return probe.getsockname()[1]
 
 
-def launch(device):
-    """Runs the test host to completion and returns its output."""
-    process = subprocess.Popen(["xcrun", "simctl", "launch", "--console", device, bundle],
+def launch(device, *app_args):
+    process = subprocess.Popen(["xcrun", "simctl", "launch", "--console", device, bundle, *app_args],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     watchdog = threading.Timer(240, process.kill)
     watchdog.start()
@@ -44,14 +49,14 @@ def launch(device):
             shot = Path("/tmp") / f"hackertube-live-{os.getpid()}.png"
             run("xcrun", "simctl", "io", device, "screenshot", str(shot))
             shutil.move(shot, build / "live.png")
-    process.wait()
+    status = process.wait()
     watchdog.cancel()
-    return "".join(lines)
+    return status, "".join(lines)
 
 
 # The fixture port is compiled into the test host, so it is rebuilt for every run.
 make = ["make", "-B", "-C", str(root), "test-app", f"BUILD={build}"]
-if not live:
+if not args.live:
     make.append(f"SITE_URL=http://127.0.0.1:{free_port()}/")
 run(*make)
 
@@ -61,16 +66,28 @@ runtime = max((r for r in runtimes if r["isAvailable"] and r["platform"] == "iOS
 phone = next(d["identifier"] for d in runtime["supportedDeviceTypes"] if d["productFamily"] == "iPhone")
 name = f"agent-{os.environ.get('PIKA_TASK_ID', 'hackertube')}-{os.getpid()}"
 device = subprocess.check_output(["xcrun", "simctl", "create", name, phone, runtime["identifier"]], text=True).strip()
+if args.smoke:
+    launches = [(("-HackerTubeHomeEnabled", "YES", "--smoke"), "HackerTube smoke: PASS")]
+else:
+    launches = [((), f"HackerTube checks with the switch {state}: PASS") for state in ("off", "on")]
+output = []
+passed = True
 try:
     run("xcrun", "simctl", "boot", device)
     run("xcrun", "simctl", "bootstatus", device, "-b")
     run("xcrun", "simctl", "install", device, str(build / "HackerTubeTests.app"))
-    output = launch(device) + launch(device)
+    for app_args, marker in launches:
+        status, log = launch(device, *app_args)
+        output.append(log)
+        if status != 0 or marker not in log.splitlines() or "FAIL" in log:
+            passed = False
+            print(f"Simulator launch exited {status}; expected {marker!r} without failures", file=sys.stderr)
+            for report in sorted((Path.home() / "Library/Logs/DiagnosticReports").glob("HackerTubeTests*.ips")):
+                print(report.read_text(errors="replace"), file=sys.stderr)
 finally:
     subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=60)
     run("xcrun", "simctl", "delete", device)
 
-(build / "checks.log").write_text(output)
-passed = all(f"HackerTube checks with the switch {state}: PASS" in output for state in ("off", "on"))
-if not passed or "FAIL" in output:
+(build / "checks.log").write_text("".join(output))
+if not passed:
     sys.exit("HackerTube checks failed")

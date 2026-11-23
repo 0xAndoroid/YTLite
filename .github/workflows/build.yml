@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - 'Unlock521/**'
-      - '.github/workflows/**'
+      - '.github/workflows/_build_tweaks.yml'
+      - '.github/workflows/main.yml'
+      - '.github/workflows/ytp_beta.yml'
+      - '.github/workflows/cyan_ts.yml'
 
 permissions:
   contents: read
