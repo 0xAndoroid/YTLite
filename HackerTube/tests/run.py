@@ -79,7 +79,11 @@ try:
     for app_args, marker in launches:
         status, log = launch(device, *app_args)
         output.append(log)
-        passed = passed and status == 0 and marker in log.splitlines() and "FAIL" not in log
+        if status != 0 or marker not in log.splitlines() or "FAIL" in log:
+            passed = False
+            print(f"Simulator launch exited {status}; expected {marker!r} without failures", file=sys.stderr)
+            for report in sorted((Path.home() / "Library/Logs/DiagnosticReports").glob("HackerTubeTests*.ips")):
+                print(report.read_text(errors="replace"), file=sys.stderr)
 finally:
     subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=60)
     run("xcrun", "simctl", "delete", device)
