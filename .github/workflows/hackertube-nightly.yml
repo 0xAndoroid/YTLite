@@ -23,26 +23,25 @@ jobs:
         run: |
           actions="repos/$GITHUB_REPOSITORY/actions"
           workflow="${GITHUB_WORKFLOW_REF%%@*}"
-          cutoff=$(gh api "$actions/runs/$GITHUB_RUN_ID" --jq '.created_at // empty') || cutoff=
-          previous=
+          cutoff=$(gh api "$actions/runs/$GITHUB_RUN_ID" |
+            jq -er '.created_at | select((fromdateiso8601 | todateiso8601) == .)') || cutoff=
+          run=true
           if [[ -n "$cutoff" ]]; then
-            previous=$(gh api --method GET "$actions/workflows/${workflow##*/}/runs" \
+            run=$(gh api --method GET "$actions/workflows/${workflow##*/}/runs" \
               -f "branch=$GITHUB_REF_NAME" -f event=schedule -f status=completed \
               -f "created=<$cutoff" -f per_page=20 |
-              jq -r --arg cutoff "$cutoff" --argjson id "$GITHUB_RUN_ID" --argjson number "$GITHUB_RUN_NUMBER" '
-                ($cutoff | fromdateiso8601) as $before
-                | [.workflow_runs[]
+              jq -r --arg cutoff "$cutoff" --arg sha "$GITHUB_SHA" \
+                --argjson id "$GITHUB_RUN_ID" --argjson number "$GITHUB_RUN_NUMBER" '
+                [.workflow_runs | arrays[]
+                  | if (.conclusion | type) != "string" then error("Invalid run conclusion") else . end
                   | select(.conclusion == "success" or .conclusion == "failure")
                   | if ([.id, .run_number] | all(type == "number" and . > 0 and . == floor))
-                    then .updated_at |= fromdateiso8601 else error("Invalid run identity") end
-                  | select(.id != $id and .run_number < $number and .updated_at < $before)]
-                | max_by([.updated_at, .run_number]).head_sha // empty') || previous=
+                    and (.updated_at | (fromdateiso8601 | todateiso8601) == .)
+                    then . else error("Invalid run identity or completion timestamp") end
+                  | select(.id != $id and .run_number < $number and .updated_at < $cutoff)]
+                | max_by([.updated_at, .run_number]).head_sha != $sha') || run=true
           fi
-          if [[ -n "$previous" && "$previous" == "$GITHUB_SHA" ]]; then
-            echo 'run=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'run=true' >> "$GITHUB_OUTPUT"
-          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
 
   full:
     needs: preflight
