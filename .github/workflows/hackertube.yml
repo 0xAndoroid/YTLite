@@ -6,8 +6,8 @@ on:
       - 'HackerTube/**'
       - '!HackerTube/**/*.md'
       - '.github/workflows/hackertube.yml'
-  schedule:
-    - cron: '17 7 * * *'
+      - '.github/workflows/hackertube-nightly.yml'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -18,8 +18,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Check fixture runner syntax
-        run: python3 -m py_compile HackerTube/tests/run.py
+      - name: Check test and preflight script syntax
+        run: python3 -m py_compile HackerTube/tests/run.py HackerTube/tests/select-nightly.py
       - name: Build the companion
         run: make -C HackerTube BUILD="$RUNNER_TEMP/hackertube"
       - name: Home-to-watch smoke
@@ -28,6 +28,19 @@ jobs:
       - name: Full simulator checks
         if: github.event_name != 'pull_request'
         run: python3 HackerTube/tests/run.py "$RUNNER_TEMP/hackertube"
+      - name: Both full fixture launches reached a result
+        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          lines = (Path(os.environ['RUNNER_TEMP']) / 'hackertube/checks.log').read_text().splitlines()
+          for state in ('off', 'on'):
+              if not any(f'HackerTube checks with the switch {state}: {result}' in lines
+                         for result in ('PASS', 'FAIL')):
+                  raise SystemExit(f'No fixture result with the switch {state}')
+          PY
       - uses: actions/upload-artifact@v7
         if: always()
         with:
