@@ -27,5 +27,5 @@ jobs:
 
   full:
     needs: preflight
-    if: needs.preflight.outputs.run == 'true'
+    if: needs.preflight.outputs.run != 'false'
     uses: ./.github/workflows/hackertube.yml

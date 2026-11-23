@@ -20,7 +20,8 @@ def previous_nightly(current, actions):
                   status='completed', created=f"<{current['created_at']}", per_page=20)['workflow_runs']
     if not isinstance(history, list):
         raise SystemExit('Invalid nightly workflow history')
-    for run in sorted(history, key=lambda run: run['run_number'], reverse=True):
+    history.sort(key=lambda run: (datetime.fromisoformat(run['updated_at']), run['run_number']), reverse=True)
+    for run in history:
         if (run['id'] == current['id'] or run['run_number'] >= current['run_number']
                 or run['workflow_id'] != workflow or run['event'] != 'schedule'
                 or run['head_branch'] != branch or run['status'] != 'completed'
