@@ -12,18 +12,34 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
-      contents: read
     outputs:
       run: ${{ steps.select.outputs.run }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
       - id: select
         name: Check for a new commit
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 HackerTube/tests/select-nightly.py
+        shell: bash
+        run: |
+          actions="repos/$GITHUB_REPOSITORY/actions"
+          workflow="${GITHUB_WORKFLOW_REF%%@*}"
+          cutoff=$(gh api "$actions/runs/$GITHUB_RUN_ID" --jq '.created_at // empty') || cutoff=
+          previous=
+          if [[ -n "$cutoff" ]]; then
+            previous=$(gh api --method GET "$actions/workflows/${workflow##*/}/runs" \
+              -f "branch=$GITHUB_REF_NAME" -f event=schedule -f status=completed \
+              -f "created=<$cutoff" -f per_page=20 |
+              jq -r --arg cutoff "$cutoff" --argjson id "$GITHUB_RUN_ID" --argjson number "$GITHUB_RUN_NUMBER" '
+                [.workflow_runs[] | select(.id != $id and .run_number < $number
+                  and .updated_at != null and .updated_at < $cutoff
+                  and (.conclusion == "success" or .conclusion == "failure"))]
+                | max_by([.updated_at, .run_number]).head_sha // empty') || previous=
+          fi
+          if [[ -n "$previous" && "$previous" == "$GITHUB_SHA" ]]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          fi
 
   full:
     needs: preflight
